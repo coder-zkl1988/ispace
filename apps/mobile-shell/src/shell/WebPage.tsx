@@ -163,9 +163,16 @@ export function WebPage({
           /*
             页面铺到状态栏底下（照片、主视觉全出血才好看），但页面自己的
             吸顶栏并不知道状态栏在哪，直接盖上去就会跟时间、信号图标叠在
-            一起。所以逐个找出 fixed/sticky 且贴着顶的元素，给它加一段
-            padding-top —— 它的底色会向上延伸到状态栏后面，内容则落在
-            图标下方，正是原生 App 的做法。
+            一起。所以逐个找出 fixed/sticky 且贴着顶的元素，把它整体下移
+            一个状态栏的高度。
+
+            ⚠️ 用 margin-top，不要用 padding-top。padding 会撑大这个元素的
+            padding box，而它往往是内部绝对定位元素的包含块——实测某个页面
+            的移动端菜单是 `.site-header` 里的 `position:absolute; top:64px;
+            transform:translateY(-130%)`，收起时停在屏幕外；padding 一加，
+            它的基准跟着下移，下沿就探回屏幕，在顶部露出一条它自己的底色。
+            那条「白带」查了很久，根因就在这里。margin 只移位置、不改尺寸，
+            子元素的相对几何原样保留。
 
             顺带把顶部实际颜色报回来，用来决定状态栏图标是黑是白。
           */
@@ -189,6 +196,21 @@ export function WebPage({
                   // 只管真正贴着顶的那些；底部操作条、侧边浮标不动
                   if (r.top > 2 || r.height > window.innerHeight * 0.5) continue;
                   el.classList.add('ispace-safe-top');
+                  /*
+                    让位会把这个条的盒子整体下移，而它内部**绝对定位**的子元素
+                    是以它为包含块的——跟着一起下移 T 像素。收起的移动端菜单
+                    正是这样：position:absolute; top:64px; translateY(-130%)，
+                    本来停在屏幕外，基准下移之后下沿探回屏幕，在顶部露出一条
+                    它自己的底色和半行导航文字。所以把它们补回去。
+                  */
+                  var subs = el.children;
+                  for (var j = 0; j < subs.length; j++) {
+                    var sub = subs[j];
+                    var scs = getComputedStyle(sub);
+                    if (scs.position === 'absolute' && scs.top !== 'auto') {
+                      sub.style.marginTop = (-T) + 'px';
+                    }
+                  }
                   var after = el.getBoundingClientRect();
                   if (after.bottom > barBottom) barBottom = after.bottom;
                 }
