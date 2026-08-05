@@ -202,7 +202,7 @@ export function AgentChat({
     >
       <View style={[s.header, { paddingTop: insets.top + 8 }]}>
         <View style={{ flex: 1 }}>
-          <Text style={s.title}>做点什么</Text>
+          <Text style={s.title}>开发</Text>
           <Text style={s.sub}>u-{username}</Text>
         </View>
         {/* 右上角留出壳保留位的宽度 */}

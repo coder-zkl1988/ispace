@@ -39,7 +39,7 @@ export type SettingKey =
 
 const CAP_LABEL: Record<Capability, { name: string; why: string }> = {
   camera: { name: '相机', why: '扫码、拍摄' },
-  microphone: { name: '麦克风', why: '「做点什么」里的语音输入' },
+  microphone: { name: '麦克风', why: '「开发」里的语音输入' },
   photos: { name: '相册', why: '给 Agent 发截图' },
   notifications: { name: '通知', why: '发布完成、更新到端提醒' },
 };

@@ -9,7 +9,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
  *   app.json 的 tabBar —— 页面**内部**的分区，由做页面的人决定，最多 5 个
  *   这里的 ShellTabs   —— 平台**固定**的五个去处，任何人任何页面都一样
  *
- * 只在壳自己的五屏（首页、我的作品、创意、开发、我）出现。进到具体页面后就交出整块屏幕
+ * 只在壳自己的五屏（首页、我的作品、创意集市、开发、我）出现。进到具体页面后就交出整块屏幕
  * ——页面可能自带底部操作条，两条叠在一起谁都点不准；而且沉浸式那一屏
  * 刚把上下两条 chrome 去掉，这里再加回来一条就前功尽弃了。
  *
@@ -31,7 +31,7 @@ export function ShellTabs({
       <Item label="我的作品" active={active === 'works'} onPress={() => onChange('works')}>
         <GridGlyph on={active === 'works'} />
       </Item>
-      <Item label="创意" active={active === 'market'} onPress={() => onChange('market')}>
+      <Item label="创意集市" active={active === 'market'} onPress={() => onChange('market')}>
         <SparkGlyph on={active === 'market'} />
       </Item>
       <Item label="开发" active={active === 'chat'} onPress={() => onChange('chat')}>
@@ -135,7 +135,7 @@ const s = StyleSheet.create({
     backgroundColor: '#fff', paddingTop: 8,
   },
   item: { flex: 1, alignItems: 'center', gap: 3 },
-  // 「我的作品」四个字，10.5 在窄屏上会换行
+  // 「我的作品」「创意集市」都是四个字，10.5 在窄屏上会换行
   label: { fontSize: 10, color: OFF },
   labelOn: { color: ON, fontWeight: '600' },
 });
