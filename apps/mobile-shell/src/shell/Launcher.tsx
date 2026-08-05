@@ -33,6 +33,7 @@ export function Launcher({
   onEdit,
   homeKey,
   onSetHome,
+  onNew,
 }: {
   displayName: string;
   items: LaunchItem[];
@@ -44,6 +45,8 @@ export function Launcher({
   /** 当前被设为首页的那个。 */
   homeKey?: string | null;
   onSetHome?: (it: LaunchItem) => void;
+  /** 跟 AI 说做个新的。对话没有 tab 了，这里是它的入口之一。 */
+  onNew?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const mine = items.filter((i) => i.kind !== 'market' && !('owner' in i && i.owner));
@@ -68,6 +71,17 @@ export function Launcher({
       <Text style={s.helloSub}>
         {mine.length + shared.length} 个页面 · 下拉刷新
       </Text>
+
+      {/*
+        对话的入口做成一行"输入框"的样子而不是一个按钮：它要说明的是
+        「在这儿说话就能做出东西来」，而按钮只说明「这儿能点」。
+      */}
+      {onNew && (
+        <Pressable style={s.newRow} onPress={onNew}>
+          <View style={s.newIcon}><Text style={s.newIconText}>＋</Text></View>
+          <Text style={s.newText}>跟 AI 说一句，做个新页面</Text>
+        </Pressable>
+      )}
 
       {mine.length === 0 && shared.length === 0 && !loading && (
         <View style={s.empty}>
@@ -275,6 +289,18 @@ const s = StyleSheet.create({
   sheetRowHint: { fontSize: 11.5, color: '#909599', marginTop: 2 },
   sheetCancel: { paddingVertical: 14, alignItems: 'center', marginTop: 6 },
   sheetCancelText: { fontSize: 14, color: '#787c80' },
+
+  newRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#fff', borderRadius: 14, padding: 12, marginBottom: 22,
+    borderWidth: 1, borderColor: 'rgba(0,0,0,.07)',
+  },
+  newIcon: {
+    width: 30, height: 30, borderRadius: 9, backgroundColor: '#fb923c',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  newIconText: { color: '#fff', fontSize: 17, fontWeight: '700', marginTop: -2 },
+  newText: { fontSize: 13.5, color: '#787c80' },
 
   empty: { paddingVertical: 40, alignItems: 'center', gap: 8 },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: '#001217' },

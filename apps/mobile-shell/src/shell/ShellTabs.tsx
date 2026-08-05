@@ -7,17 +7,22 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
  *
  * 与页面包 app.json 里的 tabBar 是两回事，别混：
  *   app.json 的 tabBar —— 页面**内部**的分区，由做页面的人决定，最多 5 个
- *   这里的 ShellTabs   —— 平台**固定**的五个去处，任何人任何页面都一样
+ *   这里的 ShellTabs   —— 平台**固定**的四个去处，任何人任何页面都一样
  *
- * 只在壳自己的五屏（首页、我的作品、创意集市、开发、我）出现。进到具体页面后就交出整块屏幕
+ * 跟 AI 对话曾经也是一个 tab，撤了：它不是一个「地方」，是一个动作。
+ * 人不会想「我去对话」，人想的是「我要改排班表」或「我要做个新的」——
+ * 两者都从「我的作品」进去，对话于是天然带着主语，页面列表也不必
+ * 在宫格和选择器里各画一遍。
+ *
+ * 只在壳自己的四屏（首页、我的作品、创意集市、我）出现。进到具体页面后就交出整块屏幕
  * ——页面可能自带底部操作条，两条叠在一起谁都点不准；而且沉浸式那一屏
  * 刚把上下两条 chrome 去掉，这里再加回来一条就前功尽弃了。
  *
- * 固定五项而不是做成可配置：这是壳的骨架不是内容。
+ * 固定四项而不是做成可配置：这是壳的骨架不是内容。
  * 能配置的东西迟早会被配置成没人认得的样子。
  */
 
-export type ShellTab = 'home' | 'works' | 'market' | 'chat' | 'me';
+export type ShellTab = 'home' | 'works' | 'market' | 'me';
 
 export function ShellTabs({
   active, onChange,
@@ -33,9 +38,6 @@ export function ShellTabs({
       </Item>
       <Item label="创意集市" active={active === 'market'} onPress={() => onChange('market')}>
         <SparkGlyph on={active === 'market'} />
-      </Item>
-      <Item label="开发" active={active === 'chat'} onPress={() => onChange('chat')}>
-        <ChatGlyph on={active === 'chat'} />
       </Item>
       <Item label="我" active={active === 'me'} onPress={() => onChange('me')}>
         <MeGlyph on={active === 'me'} />
@@ -101,18 +103,6 @@ function GridGlyph({ on }: { on: boolean }) {
           stroke={c} strokeWidth={1.8} fill={on ? ON : 'none'} fillOpacity={on ? 0.14 : 0}
         />
       ))}
-    </Svg>
-  );
-}
-
-function ChatGlyph({ on }: { on: boolean }) {
-  return (
-    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M21 11.5a8.4 8.4 0 0 1-9 8.3 9.6 9.6 0 0 1-2.9-.4L4 21l1.4-3.8A8 8 0 0 1 3.6 11.5 8.4 8.4 0 0 1 12 3.2a8.4 8.4 0 0 1 9 8.3z"
-        stroke={on ? ON : OFF} strokeWidth={1.8} strokeLinejoin="round"
-        fill={on ? ON : 'none'} fillOpacity={on ? 0.14 : 0}
-      />
     </Svg>
   );
 }

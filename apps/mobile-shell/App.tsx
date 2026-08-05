@@ -295,6 +295,7 @@ function Root() {
           homeKey={homeKey}
           onRefresh={() => void loadWebApps()}
           onOpen={openItem}
+          onNew={() => { setEditTarget(null); setView({ kind: 'chat' }); }}
           onSetHome={(it) => {
             const next = homeKey === it.key ? null : it.key;
             setHomeKey(next);
@@ -320,19 +321,21 @@ function Root() {
     );
   }
 
+  /*
+    对话是从「我的作品」进来的一层，不是一个 tab。
+    它有返回、没有底栏——进来时已经带着主语（改哪个页面，或做个新的），
+    做完就退回作品列表，不是一个要常驻的去处。
+  */
   if (view.kind === 'chat') {
     return (
-      <View style={{ flex: 1 }}>
-        <AgentChat
-          username={me.user.username}
-          target={editTarget}
-          targets={myTargets}
-          onPickTarget={setEditTarget}
-          onKeyboard={setKbUp}
-        />
-        {/* 键盘占了半屏，这时 tab 既点不到也没人想点 */}
-        {!kbUp && <ShellTabs active="chat" onChange={goTab} />}
-      </View>
+      <AgentChat
+        username={me.user.username}
+        target={editTarget}
+        targets={myTargets}
+        onPickTarget={setEditTarget}
+        onKeyboard={setKbUp}
+        onBack={() => setView({ kind: 'works' })}
+      />
     );
   }
 

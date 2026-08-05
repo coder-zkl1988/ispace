@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable,
+  ActivityIndicator, BackHandler, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,7 +42,7 @@ export interface EditTarget {
 }
 
 export function AgentChat({
-  username, target, targets, onPickTarget, onKeyboard,
+  username, target, targets, onPickTarget, onKeyboard, onBack,
 }: {
   username: string;
   target: EditTarget | null;
@@ -51,6 +51,8 @@ export function AgentChat({
   onPickTarget: (t: EditTarget | null) => void;
   /** 键盘起落。由外层决定要不要把底部 tab 收起来。 */
   onKeyboard?: (up: boolean) => void;
+  /** 退回「我的作品」。对话不再是 tab，得有路回去。 */
+  onBack?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [picking, setPicking] = useState(false);
@@ -67,6 +69,13 @@ export function AgentChat({
     半屏，那四个 tab 这时候既点不到也没人想点。
   */
   const [kb, setKb] = useState(0);
+  // 实体返回键也要能退回作品，否则一按就退出整个 App
+  useEffect(() => {
+    if (!onBack) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { onBack(); return true; });
+    return () => sub.remove();
+  }, [onBack]);
+
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -201,8 +210,13 @@ export function AgentChat({
       onLayout={() => scroller.current?.scrollToEnd({ animated: false })}
     >
       <View style={[s.header, { paddingTop: insets.top + 8 }]}>
+        {onBack && (
+          <Pressable onPress={onBack} hitSlop={12} style={s.backBtn} accessibilityLabel="返回我的作品">
+            <Icon name="chevronLeft" size={20} color={C.ink} />
+          </Pressable>
+        )}
         <View style={{ flex: 1 }}>
-          <Text style={s.title}>开发</Text>
+          <Text style={s.title}>{target ? '改这个页面' : '做个新页面'}</Text>
           <Text style={s.sub}>u-{username}</Text>
         </View>
         {/* 右上角留出壳保留位的宽度 */}
@@ -399,6 +413,7 @@ const C = {
 };
 
 const s = StyleSheet.create({
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
   targetBar: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 14, paddingVertical: 9,
