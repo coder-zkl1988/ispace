@@ -289,7 +289,6 @@ function Root() {
     return (
       <View style={{ flex: 1 }}>
         <Launcher
-          displayName={me.user.displayName}
           items={launchItems}
           loading={loadingApps}
           homeKey={homeKey}

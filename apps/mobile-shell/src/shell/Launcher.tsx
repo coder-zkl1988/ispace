@@ -25,7 +25,6 @@ export type LaunchItem =
   | { kind: 'market'; key: 'market'; name: string; letter: string };
 
 export function Launcher({
-  displayName,
   items,
   loading,
   onRefresh,
@@ -35,7 +34,6 @@ export function Launcher({
   onSetHome,
   onNew,
 }: {
-  displayName: string;
   items: LaunchItem[];
   loading: boolean;
   onRefresh: () => void;
@@ -60,14 +58,18 @@ export function Launcher({
     <ScrollView
       style={{ flex: 1, backgroundColor: '#fcfcf8' }}
       contentContainerStyle={{
-        paddingTop: insets.top + 52, paddingHorizontal: 18,
+        paddingTop: insets.top + 14, paddingHorizontal: 18,
         paddingBottom: 28,
       }}
       refreshControl={
         <RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor="#fb923c" />
       }
     >
-      <Text style={s.hello}>{displayName}的空间</Text>
+      {/*
+        标题删掉了：底栏那一格已经写着「我的作品」，屏内再写一遍
+        「XX 的空间」是同一件事说两遍，还白占掉首屏一大块。
+        只留下面这行计数——它带的是信息（有几个、能下拉刷新），不是标签。
+      */}
       <Text style={s.helloSub}>
         {mine.length + shared.length} 个页面 · 下拉刷新
       </Text>
@@ -246,8 +248,7 @@ export function LauncherLoading() {
 const TILE = 78;
 
 const s = StyleSheet.create({
-  hello: { fontSize: 26, fontWeight: '800', color: '#001217', letterSpacing: 0.5 },
-  helloSub: { fontSize: 12.5, color: '#909599', marginTop: 4, marginBottom: 20 },
+  helloSub: { fontSize: 12.5, color: '#909599', marginBottom: 16 },
   groupTitle: {
     fontSize: 13, fontWeight: '700', color: '#545659',
     marginTop: 26, marginBottom: 12, letterSpacing: 1,
