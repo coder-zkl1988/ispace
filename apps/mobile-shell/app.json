@@ -1,0 +1,110 @@
+{
+  "expo": {
+    "name": "iSpace",
+    "slug": "ispace",
+    "scheme": "ispace",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 3000,
+      "url": "http://localhost:3100/updates/manifest",
+      "requestHeaders": {
+        "expo-channel-name": "bootstrap",
+        "expo-device-id": "unset",
+        "x-prefer": "current"
+      }
+    },
+    "runtimeVersion": "54.0.0",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.ispace",
+      "icon": {
+        "light": "./assets/icon.png",
+        "dark": "./assets/icon-ios-dark.png",
+        "tinted": "./assets/icon-ios-tinted.png"
+      },
+      "infoPlist": {
+        "CFBundleDisplayName": "iSpace",
+        "NSCameraUsageDescription": "用于扫码与拍摄，具体用途由你使用的页面决定。",
+        "NSMicrophoneUsageDescription": "用于语音输入需求描述。录音转成文字后立即删除，不保留音频。",
+        "NSPhotoLibraryUsageDescription": "用于给 Coding Agent 发送截图。",
+        "NSFaceIDUsageDescription": "用于回到应用时快速解锁。",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.example.ispace",
+      "icon": "./assets/icon-android.png",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_MEDIA_IMAGES",
+        "USE_BIOMETRIC",
+        "POST_NOTIFICATIONS"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#fb923c"
+      },
+      "versionCode": 2
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#fcfcf8"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
+      "expo-updates",
+      "expo-secure-store",
+      "expo-local-authentication",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "扫码与拍摄需要相机权限。"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "给 Agent 发截图需要相册权限。"
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Caveat-Regular.ttf"
+          ]
+        }
+      ],
+      "./plugins/with-display-cutout"
+    ],
+    "extra": {
+      "ispace": {
+        "apiBase": "http://localhost:3100",
+        "updatesBase": "http://localhost:3100/updates"
+      }
+    },
+    "icon": "./assets/icon.png"
+  }
+}

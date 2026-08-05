@@ -1,0 +1,46 @@
+# Supabase 官方 compose 的 ispace 覆盖层。
+# 用法：docker compose -f docker-compose.yml -f supabase.compose.override.yml up -d
+#
+# 做三件事：
+#
+# 1. 清掉宿主端口映射。官方 compose 把 Kong 映射到宿主 8000、db 映射到 5432、
+#    supavisor 映射到 6543，在装了别的服务的机器上很容易撞端口；而 Traefik 经
+#    dokploy-network 直连容器即可，无需任何宿主端口。用 !reset 清空（compose
+#    的数组默认是追加合并，置 [] 无效）。
+#    顺带把库从公网上摘下来：5432 一旦映射到宿主，就是一个直接对外的 Postgres。
+#    注意 POSTGRES_PORT 变量不可改——它同时用于容器间连接串（PGRST_DB_URI 等），
+#    改了会断内部连接，所以只能清映射、不能换端口。
+#
+# 2. 把 Kong 挂上 dokploy-network 并加 Traefik 标签，经 stripPrefix middleware
+#    剥掉 /supabase 前缀后转发。Kong 自身不感知该前缀，其声明式路由仍按
+#    /rest/v1、/auth/v1 匹配。
+#
+# 3. 保留 kong 在 default 网络上的 api-gw 别名——Supabase 内部若干服务按此别名
+#    互访，覆盖 networks 时若漏掉会静默断连。
+services:
+  kong:
+    ports: !reset []
+    networks:
+      default:
+        aliases:
+          - api-gw
+      dokploy-network:
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.ispace-supabase.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`) && PathPrefix(`/supabase`)
+      - traefik.http.routers.ispace-supabase.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.ispace-supabase.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.ispace-supabase.middlewares=ispace-supabase-strip
+      - traefik.http.middlewares.ispace-supabase-strip.stripprefix.prefixes=/supabase
+      - traefik.http.services.ispace-supabase.loadbalancer.server.port=8000
+
+  db:
+    ports: !reset []
+
+  supavisor:
+    ports: !reset []
+
+networks:
+  dokploy-network:
+    external: true

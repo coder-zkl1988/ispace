@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+.env
+.env.local
+*.log
+.DS_Store
+
+# expo prebuild 的产物。app.json 与 config plugin 才是原生工程的真源，
+# android/ 与 ios/ 随时可由 `npx expo prebuild --clean` 重新生成
+# （Expo 的 CNG 模型）。提交它们只会带来合并冲突和过期的原生改动。
+apps/mobile-shell/android/
+apps/mobile-shell/ios/
+# expo 的图标/资源转换缓存，随时可重新生成
+apps/mobile-shell/.expo/

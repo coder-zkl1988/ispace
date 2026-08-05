@@ -1,0 +1,121 @@
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	encode gzip
+
+	# 平台自有静态资产（shell.js 等）。/platform 已在下方保留字排除列表中，
+	# 这里给它一个落地的 handler，否则会被兜底转给 portal。
+	handle /platform/* {
+		root * /srv/platform
+		uri strip_prefix /platform
+		file_server
+	}
+
+	# 控制台 SPA。/console 在保留字排除列表中，这里给它落地的 handler。
+	handle /console* {
+		root * /srv/console
+		uri strip_prefix /console
+		try_files {path} /index.html
+		file_server
+	}
+
+	# 安卓 App 的安装包。/dist 已在下方保留字排除列表中。
+	#
+	# 这条路径**故意不需要登录**：同事装 App 时手上还没有会话，扫码就得能下。
+	# 位置放在 @userapp 之前，因此不会撞上那段的 forward_auth；也不会落到最后
+	# 的 portal 兜底——否则浏览器拿到的是 index.html，存下来是个装不了的假 apk。
+	handle /dist/* {
+		# ⚠️ 与下面 @userapp 同一个坑：Caddy 按**标准顺序**执行指令，
+		# header 排在 uri 前面。这里干脆用 route 锁死书写顺序，
+		# 免得下次改的人还要在脑子里重排一遍。
+		route {
+			# APK 的 Content-Type 必须显式给。Go 的 mime 表里没有 .apk，
+			# file_server 只能退回按内容嗅探，嗅出来是 application/zip 或
+			# application/octet-stream——部分安卓浏览器据此把安装包当压缩包
+			# 或纯文本打开，点了不进安装器。
+			#
+			# defer 是关键：不加的话这条 header 在 file_server 之前就写完了，
+			# file_server 随后写自己那份判断结果，把它盖掉。defer 让它推迟到
+			# 真正 WriteHeader 时才生效，才盖得住。
+			@apk path *.apk
+			header @apk {
+				Content-Type application/vnd.android.package-archive
+				defer
+			}
+			root * /srv/dist
+			uri strip_prefix /dist
+			file_server
+		}
+	}
+
+	# ── 保留路径的兜底：明确 503，绝不落到 portal ──────────────────────
+	#
+	# 这些路径本应由 Traefik 在到达 Caddy 之前就路由到各自的服务
+	# （/deploy → deploy-service，/supabase → Kong，/updates → updates-service）。
+	# 请求走到这里只意味着一件事：对应服务未部署，或 Traefik 绑定失效。
+	#
+	# 若不拦，请求会落到最后的 portal 兜底，而 portal 的 SPA 回落对任何路径
+	# 都返回 index.html + 200。后果是客户端拿到一坨 HTML 却以为成功：
+	#   - Expo 客户端打 /updates/manifest 得到 200 + HTML，报错指向 JSON
+	#     解析失败而非"服务没起来"，排查方向完全错
+	#   - CLI 打 /deploy/api/* 同理
+	# 实测踩过这个坑（updates-service 未部署时 /updates/health 返回 200 HTML），
+	# 故在此显式 503 并说明原因。
+	# 注意：handle 只接受单个 matcher，多个路径模式必须先定义命名 matcher。
+	# 写成 `handle /a* /b* { }` 会在 caddy validate 时报
+	# "wrong argument count or unexpected line ending"。
+	@reservedUnbound path /deploy* /supabase* /updates* /svc* /api*
+	handle @reservedUnbound {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"code":"SERVICE_UNAVAILABLE","message":"该保留路径对应的服务未部署，或网关绑定失效。这是平台路径，不会回落到用户空间。"}` 503
+	}
+
+	# /{user}/{app}/... → /srv/sites/{user}/{app}/...
+	#
+	# 保留路径的排除是纵深防御：正常情况下 Traefik 会先把 /deploy、/console 等
+	# 路由走，Caddy 根本看不到它们。但若 Traefik 绑定配错，没有这层排除，Caddy
+	# 会静默地去 /srv/sites/deploy/api/ 找文件，把配置失误变成难查的错误路由。
+	# 该列表必须与 packages/contracts 的 RESERVED_PATHS 保持一致。
+	@userapp {
+		path_regexp ua ^/([a-z0-9][a-z0-9-]{0,30})/([a-z0-9][a-z0-9-]{0,30})(/.*)?$
+		not path_regexp ^/(console|deploy|dist|updates|platform|supabase|svc|api|assets|static|admin|login|logout|health|reset|_)(/|$)
+	}
+	handle @userapp {
+		# ⚠️ 必须用 route 而不是裸写指令。
+		#
+		# Caddyfile 里的指令是按**标准顺序**执行的，不是按写的顺序。
+		# 直接写的话 try_files 产生的 rewrite 会排在 forward_auth 前面，
+		# 等鉴权跑到时 URI 已经被 `uri path_regexp` 削成了 `/`，
+		# 服务端收到的 X-Forwarded-Uri 里根本没有 {user}/{app}——
+		# 于是每个请求都以"认不出路径"的姿态被放行，鉴权形同虚设。
+		# route 保持书写顺序，鉴权拿到的才是原始 URI。
+		route {
+			# 先问服务端这个人能不能看，再出文件。
+			#
+			# 这一段补的是一个真实存在过的越权：此前这里是 root + file_server
+			# 直出，中间没有任何鉴权——**任何能访问这个域名的人，不用登录，**
+			# **只要知道 URL 就能打开别人的任意页面**。实测不带 cookie 请求一个
+			# visibility=private 的页面返回 200。apps.visibility 那三档当时
+			# 只影响创意市场与聚合页的展示，从没参与过访问判定。
+			#
+			# 非 2xx 的响应（302 去登录 / 403 / 404）由 Caddy 原样回给浏览器，
+			# 所以拒绝页长什么样由服务端决定。
+			forward_auth ispace-deploy-service:3100 {
+				uri /deploy/api/authz/page
+			}
+
+			root * /srv/sites/{re.ua.1}/{re.ua.2}
+			uri path_regexp ^/[^/]+/[^/]+ ""
+			try_files {path} {path}/ /index.html
+			file_server
+		}
+	}
+
+	# 其余（含 /{user}/ 与 /）→ portal
+	handle {
+		reverse_proxy portal:3000
+	}
+}

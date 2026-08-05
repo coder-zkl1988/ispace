@@ -1,0 +1,2 @@
+# 合成中间产物（compose-bundle 的 --out），每次发包重新生成
+composed/

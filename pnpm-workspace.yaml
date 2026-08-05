@@ -1,0 +1,28 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# esbuild 需执行安装脚本下载平台二进制，vitest 依赖它。
+# pnpm 11 默认阻止依赖执行脚本，此处显式放行（键名为 allowBuilds，
+# 非旧版的 onlyBuiltDependencies）。
+allowBuilds:
+  esbuild: true
+
+# Expo 的构建链（@expo/cli → @expo/metro-config）锁着 postcss 8.4.x，
+# 那条线上有两个 high：任意文件读取（GHSA-r28c-9q8g-f849）与 source map
+# 自动加载的路径穿越。都只在构建期触发，产物与运行时不受影响，但构建机上
+# 处理第三方 CSS 时仍是实打实的读文件口子。
+#
+# 抬到 8.5.x —— 同一大版本内的小版本升级，postcss 的 8.x API 稳定。
+# 升级后已重跑 expo export 与全仓构建确认无回归。
+overrides:
+  postcss: "^8.5.25"
+
+# ── 已知且接受的依赖告警 ────────────────────────────────────────────
+# uuid@7.0.3（GHSA-w5hq-g745-h8pq，moderate）
+#   来源：expo → @expo/cli → @expo/config-plugins → xcode → uuid@^7
+#   内容：v3/v5/v6 在调用方传入 buf 时缺少边界检查。
+#   不升的理由：xcode 锁死 uuid@^7，强抬到 11 是跨大版本（v11 改成具名导出），
+#   会打断 expo prebuild 的 iOS 路径。而 xcode 只用它生成 Xcode 工程对象 ID，
+#   buffer 不来自外部输入，触发不到这条路径。
+#   复查条件：xcode 放宽 uuid 版本范围时跟进。

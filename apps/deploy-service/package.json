@@ -1,0 +1,32 @@
+{
+  "name": "@ispace/deploy-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "@ispace/contracts": "workspace:*",
+    "@ispace/db": "workspace:*",
+    "@ispace/auth": "workspace:*",
+    "@ispace/storage": "workspace:*",
+    "@ispace/scanner": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/multipart": "^9.0.3",
+    "fastify": "^5.2.1",
+    "zod": "^3.24.1",
+    "@ispace/orchestrator": "workspace:*",
+    "@ispace/agent": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

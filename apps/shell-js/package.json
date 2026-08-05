@@ -1,0 +1,14 @@
+{
+  "name": "@ispace/shell-js",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/shell.ts --bundle --minify --format=iife --target=es2020 --charset=utf8 --outfile=dist/shell.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.3"
+  }
+}

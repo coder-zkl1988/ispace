@@ -1,0 +1,52 @@
+# 静态托管：多租户 Caddy + portal
+#
+# 接入方式：Dokploy 的 Traefik 启用了 docker provider 且 watch 标签
+# （/etc/dokploy/traefik/traefik.yml: providers.docker.network=dokploy-network,
+# exposedByDefault=false），因此这里用 traefik.* 标签接入，容器必须挂在
+# dokploy-network 上。
+#
+# 路由优先级：Traefik 默认按规则长度排序，`Host(...) && PathPrefix(...)` 比
+# 这里的纯 `Host(...)` 长，因此后续 /deploy、/supabase 等保留路径的绑定天然
+# 优先于本兜底路由，无需手工设 priority。
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: ispace-caddy
+    restart: unless-stopped
+    volumes:
+      - /etc/ispace/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/sites:/srv/sites:ro
+      # 必须同时挂 releases：sites 下是指向 releases 的软链，
+      # 只挂 sites 会让软链在容器内指向不存在的路径，表现为 404。
+      - /srv/releases:/srv/releases:ro
+      - /srv/platform:/srv/platform:ro
+      - /srv/console:/srv/console:ro
+      # 安卓安装包。加挂载后必须 `up -d` 重建容器，`restart` 不会生效——
+      # 卷是创建容器时定死的，重启只是同一个容器再跑一遍。
+      - /srv/dist:/srv/dist:ro
+    depends_on:
+      - portal
+    networks: [dokploy-network]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.ispace-static.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`)
+      - traefik.http.routers.ispace-static.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.ispace-static.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.ispace-static.loadbalancer.server.port=8080
+
+  # portal：统一入口 SPA。
+  # 用 SPA 兜底（try_files → /index.html）——portal 要处理 / 与 /{user}/
+  # 两种路径，二者都由前端路由解析，服务端一律回 index.html。
+  portal:
+    image: caddy:2-alpine
+    container_name: ispace-portal
+    restart: unless-stopped
+    volumes:
+      - /srv/portal:/srv/portal:ro
+      - /etc/ispace/portal.Caddyfile:/etc/caddy/Caddyfile:ro
+    networks: [dokploy-network]
+
+networks:
+  dokploy-network:
+    external: true

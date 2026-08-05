@@ -1,0 +1,40 @@
+# updates-service：自托管 expo-updates 协议服务器。
+#
+# 与 deploy-service 同样需要两张网：dokploy-network 供 Traefik 反代，
+# supabase_default 供访问 mobile_channels / mobile_releases 两张表。
+services:
+  updates-service:
+    image: ispace/updates-service:latest
+    container_name: ispace-updates-service
+    restart: unless-stopped
+    # 与 /srv/bundles 属主一致，理由同 deploy-service：以 root 运行会在宿主
+    # 产出 root 拥有的文件，运维用户既删不掉也改不了，rm 还会静默失败。
+    user: "${ISPACE_UID:-1000}:${ISPACE_GID:-1000}"
+    environment:
+      NODE_ENV: production
+      PORT: "3200"
+      LOG_LEVEL: info
+      ISPACE_PUBLIC_BASE: ${ISPACE_PUBLIC_BASE:?平台对外根地址，如 https://ispace.example.com}
+      ISPACE_BUNDLE_ROOT: /srv/bundles
+      PGHOST: supabase-db
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?需要从 ~/.ispace/supabase.env 注入}
+    volumes:
+      # 只读：bundle 由 deploy-service 写入，updates-service 只负责分发
+      - /srv/bundles:/srv/bundles:ro
+    networks: [dokploy-network, supabase_default]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.ispace-updates.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`) && PathPrefix(`/updates`)
+      - traefik.http.routers.ispace-updates.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.ispace-updates.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.ispace-updates.loadbalancer.server.port=3200
+
+networks:
+  dokploy-network:
+    external: true
+  supabase_default:
+    external: true

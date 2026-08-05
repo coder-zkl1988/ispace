@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>ispace Android adaptive icon foreground concept</title>
+  <desc>
+    White foreground for use with an #fb923c adaptiveIcon background.
+    The mark is scaled into Android's central safe area so circular masks do not clip it.
+  </desc>
+  <g transform="translate(143.36 143.36) scale(.72)">
+    <path d="M216 304Q216 280 239 272L464 208Q488 201 488 226V766Q488 787 468 794L239 858Q216 865 216 840ZM280 350L424 309V711L280 752Z" fill="#ffffff" fill-rule="evenodd"/>
+    <path d="M536 226Q536 201 560 208L785 272Q808 280 808 304V840Q808 865 785 858L556 794Q536 787 536 766ZM600 309L744 350V752L600 711Z" fill="#ffffff" fill-rule="evenodd"/>
+  </g>
+</svg>

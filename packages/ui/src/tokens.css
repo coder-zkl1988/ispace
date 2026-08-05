@@ -1,0 +1,137 @@
+@import "./fonts.css";
+
+/* Tabby 设计系统 token（移植自设计稿 _ds/tabby-design-system/tokens/）。
+   只保留 ispace 实际用到的子集，未用到的不搬——搬进来就要维护。 */
+:root {
+  /* ── 品牌 ────────────────────────────────────────────────────
+     用色克制是这套设计的核心：近黑是主操作色，橙色是佐料不是主菜
+     （约 10% 法则），青色只承担链接、焦点环与"存活"状态。 */
+  --tabby-orange: #fb923c;
+  --tabby-orange-hover: #f97316;
+  --tabby-orange-subtle: rgba(251, 146, 60, 0.1);
+  --tabby-teal: #3db9ce;
+  --tabby-teal-subtle: rgba(61, 185, 206, 0.08);
+  --tabby-cream: #fcfcf8;
+  --tabby-ink: #042028;
+
+  /* ── 表面 ──────────────────────────────────────────────────── */
+  --surface-canvas: #fcfcf8;
+  --surface-1: #ffffff;
+  --surface-2: #f5f5f3;
+  --surface-3: #eeeeeb;
+  --surface-sidebar: #f4f3ee;
+  --surface-sidebar-hover: #edece5;
+  --surface-sidebar-active: #e7e5dc;
+
+  /* ── 文字 ──────────────────────────────────────────────────── */
+  --text-heading: #001217;
+  --text-primary: #1c1f23;
+  --text-secondary: #545659;
+  --text-tertiary: #787c80;
+  --text-placeholder: #787c80;
+  --text-inverse: #ffffff;
+
+  /* ── 线 ────────────────────────────────────────────────────── */
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border: rgba(0, 0, 0, 0.08);
+  --border-hover: rgba(0, 0, 0, 0.12);
+
+  /* ── 操作色（近黑，刻意的）───────────────────────────────── */
+  --accent: #1c1f23;
+  --accent-hover: #222b39;
+  --accent-subtle: rgba(28, 31, 35, 0.06);
+  --accent-fg: #ffffff;
+
+  /* ── 功能色 ────────────────────────────────────────────────── */
+  --success: #00a365;
+  --success-subtle: rgba(0, 163, 101, 0.1);
+  --warning: #edc337;
+  --warning-subtle: rgba(237, 195, 55, 0.12);
+  --error: #f8672f;
+  --error-subtle: rgba(248, 103, 47, 0.08);
+  --danger: #f93920;
+  --link: #2657bb;
+  --info-subtle: rgba(38, 87, 187, 0.08);
+
+  /* ── 字体 ──────────────────────────────────────────────────── */
+  --font-sans: "Manrope", "Inter", -apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --font-script: "Caveat", cursive;
+
+  /* 正文主力字号是紧凑的 13px，这是设计稿的刻意选择，不要放大 */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  /* 卡片标题用 15px。设计稿实测值，介于 md 与 lg 之间。 */
+  --text-card-title: 15px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 26px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.4;
+  --leading-normal: 1.6;
+  --tracking-label: 0.05em;
+  --tracking-wide: 0.08em;
+
+  /* ── 间距（4px 基础网格）──────────────────────────────────── */
+  --space-1: 2px;  --space-2: 4px;  --space-3: 6px;  --space-4: 8px;
+  --space-5: 10px; --space-6: 12px; --space-8: 16px; --space-10: 20px;
+  --space-12: 24px; --space-16: 32px; --space-20: 40px; --space-24: 48px;
+
+  /* ── 圆角（慷慨柔和，无锐角）─────────────────────────────── */
+  --radius-4: 4px;  --radius-6: 6px;  --radius-8: 8px;
+  --radius-10: 10px; --radius-12: 12px; --radius-16: 16px;
+  --radius-pill: 100px;
+  --radius: var(--radius-8);
+
+  /* ── 框架尺寸 ──────────────────────────────────────────────── */
+  /* 213px 是设计稿的实测渲染宽度。设计系统 token 文件里写的是 192，
+     但实际组件渲染出来是 213——以实测为准，视觉才对得上。 */
+  --sidebar-width: 213px;
+  --nav-item-height: 34px;
+  /* 设计稿里常规按钮实测 32px。36 是 token 文件的值，但没有组件用它。 */
+  --control-height: 32px;
+  --control-height-sm: 32px;
+  --content-max: 1120px;
+
+  /* ── 投影（柔和低对比）────────────────────────────────────── */
+  --shadow-rest: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 4px 8px 0 rgba(0, 0, 0, 0.08);
+  --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-focus: 0 0 0 2px rgba(61, 185, 206, 0.25);
+  /* 对话框专用：比 dropdown 大一档，把模态明确抬离页面。 */
+  --shadow-elevated: 0 18px 60px rgba(0, 0, 0, 0.08);
+
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-blur: saturate(180%) blur(20px);
+
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  /* 模态入场曲线。起步快、收尾极缓，是设计稿里那种"轻轻落位"的手感。 */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 0.15s;
+  --transition-colors: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font: var(--weight-regular) var(--text-base) / var(--leading-normal) var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 所有数字走等宽。设计稿明确要求，避免列表里数字跳动。 */
+.num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+a { color: inherit; }

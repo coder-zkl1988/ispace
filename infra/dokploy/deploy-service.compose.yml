@@ -1,0 +1,82 @@
+# deploy-service：REST + MCP 同进程。
+#
+# 网络：必须同时挂两张网。
+#   dokploy-network  —— 供 Traefik 反代（Traefik 只监听这张网上的容器标签）
+#   supabase_default —— 访问 supabase-db（Supabase 的库不对宿主暴露端口）
+#
+# 路由优先级：`Host(...) && PathPrefix(/deploy)` 的规则长度大于静态托管的
+# 纯 `Host(...)`，Traefik 默认按规则长度排序，故本路由天然优先于兜底，
+# 无需手工设 priority。
+#
+# TLS：默认走 websecure + letsencrypt（Dokploy 自带该 certresolver）。
+# 内网 HTTP 部署把 ISPACE_TRAEFIK_ENTRYPOINT 设为 web，并删掉下面那行
+# certresolver 标签——把 router 挂在 web 上却留着 certresolver，Traefik 会
+# 当它是 TLS router，结果是 80 端口上什么都不响应。
+services:
+  deploy-service:
+    image: ispace/deploy-service:latest
+    container_name: ispace-deploy-service
+    restart: unless-stopped
+    # 必须与宿主上 /srv/sites、/srv/releases 的属主一致（默认第一个普通用户
+    # 1000:1000）。以 root 运行会在宿主上产出 root 拥有的发布目录，运维用户
+    # 既删不掉也改不了，手工清理时还会静默失败（rm 报 Permission denied
+    # 而脚本继续往下跑）。属主不是 1000 时用 ISPACE_UID/ISPACE_GID 覆盖。
+    user: "${ISPACE_UID:-1000}:${ISPACE_GID:-1000}"
+    environment:
+      NODE_ENV: production
+      PORT: "3100"
+      LOG_LEVEL: info
+      ISPACE_PUBLIC_BASE: ${ISPACE_PUBLIC_BASE:?平台对外根地址，如 https://ispace.example.com}
+      # 平台元数据与用户 schema 都在 Supabase 的那套 Postgres 里
+      PGHOST: supabase-db
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?需要从 ~/.ispace/supabase.env 注入}
+      # 数据空间屏要把它给用户的应用用。这是 Supabase 的匿名公钥，
+      # 本就设计为下发到前端；真正的库密码不在此列。
+      SUPABASE_ANON_KEY: ${ANON_KEY:-}
+      SESSION_SECRET: ${SESSION_SECRET:?需要至少 32 字符}
+      # 编排器：有这两项则用 Dokploy，缺则回落 Mock（本地开发无需配置）
+      DOKPLOY_URL: ${DOKPLOY_URL:-}
+      DOKPLOY_TOKEN: ${DOKPLOY_TOKEN:-}
+      ISPACE_SITES_ROOT: /srv/sites
+      ISPACE_RELEASES_ROOT: /srv/releases
+      ISPACE_BUNDLE_ROOT: /srv/bundles
+      ISPACE_WORKSPACE_ROOT: /srv/workspaces
+      # Coding Agent 的模型通道。缺失时 Agent 端点返回"未配置"，其余功能不受影响。
+      # 不用 codex 专用模型：实测其工具调用 arguments 恒为空，无法驱动 Agent。
+      AGENT_BASE_URL: ${AGENT_BASE_URL:-}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
+      AGENT_MODEL: ${AGENT_MODEL:-gpt-5.6}
+      # 语音转写兜底。缺失时 /voice/transcribe 返回 NOT_IMPLEMENTED，
+      # 手机端据此保持置灰，不静默失败。
+      STEP_API_KEY: ${STEP_API_KEY:-}
+      STEP_ASR_URL: ${STEP_ASR_URL:-}
+      STEP_ASR_MODEL: ${STEP_ASR_MODEL:-}
+    volumes:
+      # 需要写权限：解压产物、切换软链、清理旧版本
+      - /srv/sites:/srv/sites
+      - /srv/releases:/srv/releases
+      # 移动端页面包由本服务写入，updates-service 只读分发
+      - /srv/bundles:/srv/bundles
+      # Agent 的工作区：每用户一个目录，工具集限定在其中
+      - /srv/workspaces:/srv/workspaces
+      # Dokploy 的部署日志。只读，且只为一件事：后端应用起不来时，
+      # 把真正的原因（镜像拉不到、构建报错…）拿给用户看，而不是让
+      # 界面上只剩一个「启动失败」。
+      - /etc/dokploy/logs:/etc/dokploy/logs:ro
+    networks: [dokploy-network, supabase_default]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.ispace-deploy.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`) && PathPrefix(`/deploy`)
+      - traefik.http.routers.ispace-deploy.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.ispace-deploy.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.ispace-deploy.loadbalancer.server.port=3100
+
+networks:
+  dokploy-network:
+    external: true
+  supabase_default:
+    external: true

@@ -1,0 +1,18 @@
+{
+	auto_https off
+	admin off
+}
+
+:3000 {
+	root * /srv/portal
+	encode gzip
+	# portal 同时服务 / 与 /{user}/，两者都交给前端路由，故一律回 index.html
+	try_files {path} /index.html
+	file_server
+
+	# 字体与带哈希的资源可长缓存；index.html 不缓存，保证发版即时生效
+	@immutable path /assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	@html path /index.html /
+	header @html Cache-Control "no-cache"
+}

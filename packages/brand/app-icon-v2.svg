@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>ispace mobile app icon</title>
+  <desc>
+    Two open page planes create a personal space in the center.
+    The full-bleed background is intentional: iOS and Android apply their own masks.
+  </desc>
+  <rect width="1024" height="1024" fill="#fb923c"/>
+  <path d="M216 304Q216 280 239 272L464 208Q488 201 488 226V766Q488 787 468 794L239 858Q216 865 216 840Z" fill="#ffffff"/>
+  <path d="M280 350L424 309V711L280 752Z" fill="#fb923c"/>
+  <path d="M536 226Q536 201 560 208L785 272Q808 280 808 304V840Q808 865 785 858L556 794Q536 787 536 766Z" fill="#ffffff"/>
+  <path d="M600 309L744 350V752L600 711Z" fill="#fb923c"/>
+</svg>

@@ -1,0 +1,13 @@
+{
+  "name": "@ispace/updates-service", "version": "0.1.0", "private": true, "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run", "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@ispace/contracts": "workspace:*", "@ispace/db": "workspace:*",
+    "fastify": "^5.2.1", "@fastify/multipart": "^9.0.3", "zod": "^3.24.1"
+  },
+  "devDependencies": { "typescript": "^5.7.3", "vitest": "^3.0.5" }
+}
