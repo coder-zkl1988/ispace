@@ -7,23 +7,101 @@
 你：把这个周报页面发到我的空间，叫「周报」
 
 Claude 调用 MCP → 密钥扫描 → 原子切换软链 → 发布完成
-        https://ispace.example.com/lixiao/zhoubao/
+        https://ispace.example.com/zhangming/zhoubao/
 ```
 
 发布链路带密钥扫描与 XSS 检查，每个人有独立的数据 schema 与配额，
 所有动作进审计日志。同一套东西有网页控制台、命令行和手机壳三个入口。
 
 > **状态**：核心闭环已跑通并在生产使用。这是一个真实内部平台的开源版本，
-> 不是演示项目。文档与注释为中文。
+> 不是演示项目。界面与文档为中文。
 
 ---
 
-## 它解决什么
+## 界面
 
-公司里会用 AI 写点小工具的人越来越多，卡住他们的从来不是写代码，
-而是写完之后：放哪、怎么给别人看、数据存哪、要不要找运维开机器。
+> 下面所有截图都取自本机演示实例，数据全部是编的（人名、页面名、用量、
+> 审计记录），域名是 `ispace.localhost`。没有任何真实内部信息。
 
-iSpace 把这一段变成基础设施：
+**我的页面**——登录后的落地页。分组卡片墙，顶部是同事分享待接受的卡片。
+
+![我的页面](docs/images/portal-space.png)
+
+**空间总览**——你的地址、配额、最近发布，一屏看完。左下角那段是一句话发布的示例。
+
+![空间总览](docs/images/console-overview.png)
+
+**接入指引**——把中间那段话复制给 AI，它自己就把 MCP 接好了。
+不用找配置文件，也不用开终端。
+
+![接入指引](docs/images/console-guide.png)
+
+**发布记录**——每次发布留痕：谁、何时、从哪个入口、结果。
+「被阻断」是密钥扫描命中后拦下来的那些。
+
+![发布记录](docs/images/console-audit.png)
+
+**平台总览（管理员）**——容量、发布量、单机负载。
+
+![平台总览](docs/images/admin-overview.png)
+
+<details>
+<summary>更多截图（我的页面管理、配额、后端应用、更新通道、员工与开通、平台巡检、登录页）</summary>
+
+**我的页面**（控制台）——版本、来源、可见性、分享对象，以及回滚入口。
+
+![我的页面](docs/images/console-pages.png)
+
+**配额与用量**——静态空间、后端应用、数据行数三档，超了可以在这里申请。
+
+![配额与用量](docs/images/console-quota.png)
+
+**后端应用**——需要自定义后端时在这里开，CPU / 内存限额由平台强制写入。
+
+![后端应用](docs/images/console-backends.png)
+
+**更新通道**——手机端页面包的版本、灰度比例与到端设备数。
+
+![更新通道](docs/images/console-mobile.png)
+
+**员工与开通（管理员）**——开通、改角色、重置密码、离职回收。
+
+![员工与开通](docs/images/admin-users.png)
+
+**平台巡检（管理员）**——把「重建之后还要做什么」写下来，不依赖某个人记得。
+
+![平台巡检](docs/images/admin-inspection.png)
+
+**登录页**——默认邮箱 + 密码，接了 OIDC 会多一个 SSO 入口。
+
+![登录页](docs/images/portal-login.png)
+
+</details>
+
+---
+
+## 背景：为什么会有这个东西
+
+### 卡住人的从来不是写代码
+
+公司里会用 AI 写点小工具的人越来越多。运营写个排班表，销售写个客户跟进看板，
+财务写个报销计算器——AI 生成这些页面只要几分钟。
+
+然后就卡住了。卡住的地方从来不是"写不出来"，而是写完之后：
+
+- **放哪。** 本地开个 `python -m http.server` 只有自己能看。丢到聊天群里
+  发个 zip，别人下载解压双击，路径一错就是白屏。
+- **怎么给别人看。** 要一个别人打开就能用的地址。找运维要，运维要问清楚
+  这是什么、谁负责、出了事找谁——一张工单三天。
+- **数据存哪。** 稍微像样一点的工具就要存数据。让每个人自己去开一个数据库、
+  自己管连接串和密码，既不现实也不安全。
+- **万一发错了。** AI 生成的代码里带着一个硬编码的 API key，发出去就是
+  公司级的事故。而写的人多半意识不到。
+
+于是大多数人做到一半就放弃了，或者做出来只有自己在用。**AI 把"生产内容"的
+成本降到了近乎零，但"把内容交付出去"的成本一点没降。** iSpace 补的是后半截。
+
+### 平台要替人兜住的四件事
 
 | 需求 | 平台给的 |
 |---|---|
@@ -34,6 +112,24 @@ iSpace 把这一段变成基础设施：
 | 给同事用 | 分享给个人，或上架内部「创意市场」 |
 | 手机上看 | Expo 壳，页面可作为 tab 嵌入，支持自托管热更新 |
 | 别把密钥发出去 | 发布链路 gitleaks 扫描，命中即阻断并留痕 |
+
+### 几条贯穿始终的判断
+
+**给不写代码的人用，就不能要求他们理解部署。** 「接入指引」那一屏的最终形态
+是一段可以整段复制、丢给 AI 让它自己完成接入的话——因为让人自己拼 header、
+从 cookie 里抠 token，实际上没人会用。
+
+**便利不能以牺牲隔离为代价。** 每个人一个数据 schema、一份配额、一个工作区；
+用户页面的访问要过服务端鉴权（Caddy `forward_auth`），`visibility` 那三档
+是真的访问控制，不是展示过滤。
+
+**默认值要往安全的一边倒。** 自助注册的邮箱白名单默认是一个匹配不上任何人的
+占位：忘了配的后果是"谁都注册不了"，而不是"谁都注册得了"。两种失败的代价
+不对等。
+
+**规模化的形态要一开始就选对。** 静态站点是**单个多租户容器**按路径映射用户
+目录，不是"一人一个部署应用"——后者到几十人就撑不住。只有确需自定义后端时
+才去创建独立应用。
 
 ---
 
@@ -53,16 +149,14 @@ iSpace 把这一段变成基础设施：
 
 几个有意为之的选择：
 
-- **静态站点是单个多租户 Caddy 容器**按路径映射用户目录，不是「一人一个
-  Dokploy 应用」——后者到几十人就撑不住了。只有确需自定义后端时才经
-  Dokploy API 建独立应用。
 - **单域名 + 路径**（`/{user}/{app}/`），不用泛域名。一条 A 记录、
   HTTP-01 自动签发，不需要 DNS API 凭据。代价是用户名与平台路径共享命名空间，
   用 `RESERVED_PATHS` 强校验对冲。
-- **平台 chrome 在发布期注入**（往 `index.html` 塞 `<script src="/platform/shell.js">`），
-  不在网关运行期改写响应体——后者要给 Caddy 引入重写插件，且干扰流式响应与缓存。
-- **用户页面访问要过鉴权**。Caddy 的 `forward_auth` 先问服务端能不能看再出文件；
-  `visibility` 那三档是真的访问控制，不只是展示过滤。
+- **平台 chrome 在发布期注入**（往 `index.html` 塞
+  `<script src="/platform/shell.js">`），不在网关运行期改写响应体——后者要给
+  Caddy 引入重写插件，且干扰流式响应与缓存。
+- **发布是原子的**：产物解压到 `releases/{时间戳}/`，再切软链。回滚就是把软链
+  切回去，秒级生效，旧版本仍在盘上。
 
 设计决策与其理由的完整记录见
 [docs/specs/2026-08-03-ispace-platform-design.md](docs/specs/2026-08-03-ispace-platform-design.md)。
@@ -76,7 +170,7 @@ pnpm workspaces + Turborepo，TypeScript 全栈。
 ```
 apps/
   portal/            统一入口：登录引导、/{user}/ 聚合页、创意市场
-  console/           控制台：员工 7 屏 + 管理员 5 屏
+  console/           控制台：员工 8 屏 + 管理员 7 屏
   deploy-service/    部署服务 REST + MCP server（同进程，Fastify）
   shell-js/          平台 chrome，构建为 /platform/shell.js 单文件
   updates-service/   自托管 expo-updates 更新服务器
@@ -96,7 +190,7 @@ infra/
   dokploy/           compose 定义与路由绑定
   caddy/             Caddyfile
   scripts/           部署脚本（幂等，编号即执行顺序）
-docs/                规格、计划、运维手册
+docs/                设计规格、实现计划、部署与运维手册
 ```
 
 `packages/contracts` 是骨架的核心资产：实体 schema、API 契约、MCP 工具入参、
@@ -105,7 +199,7 @@ docs/                规格、计划、运维手册
 
 ---
 
-## 快速开始
+## 快速开始（本机）
 
 需要 Node 22+ 与 pnpm 11+。
 
@@ -115,18 +209,13 @@ pnpm build
 pnpm test
 ```
 
-跑起本机开发环境（需要一个 Postgres）：
+跑起开发环境（需要一个 Postgres）：
 
 ```bash
-# 1. 起库并跑迁移
 export PGHOST=localhost PGPORT=5432 PGDATABASE=postgres PGUSER=postgres
 export POSTGRES_PASSWORD=...
 export SESSION_SECRET=$(openssl rand -hex 32)
-
-# 2. 开发登录页（生产绝对不要设）
-export ISPACE_DEV_LOGIN=1
-
-# 3. 起全部 dev 进程
+export ISPACE_DEV_LOGIN=1     # 开发登录页，生产绝对不要设
 pnpm dev
 ```
 
@@ -134,34 +223,120 @@ deploy-service 在 `:3100`（自带 `/deploy/api` 前缀，本机无需网关）
 updates-service 在 `:3200`，portal 与 console 由 Vite 起。
 没配 `DOKPLOY_URL` 时编排器自动回落 `MockOrchestrator`，本机不需要 Docker。
 
-命令行：
-
-```bash
-pnpm --filter @ispace/cli build
-ISPACE_BASE_URL=http://localhost:3100 node packages/cli/dist/index.js login
-```
-
 ---
 
 ## 部署到自己的服务器
 
-一台干净的 Linux 机器（4 vCPU / 8 GB / 100 GB 起），80、443、3000 空闲，
-一个解析过去的域名。
+脚本编号即执行顺序，全部幂等——中途失败修好后重跑同一条即可。
+完整版含验收步骤与上线前 checklist：**[docs/runbooks/deployment.md](docs/runbooks/deployment.md)**。
+
+### 0. 前置
+
+一台干净的 Linux（Ubuntu 22.04+ 或同等），Docker 24+，4 vCPU / 8 GB / 100 GB 起。
+**80、443、3000 必须空闲**——Traefik 要接管 80/443，Dokploy UI 用 3000。
+机器上最好不跑别的容器编排：Dokploy 会 `swarm init`，与既有编排相互干扰。
+
+一条 A 记录指向该机器。公网部署到这里就够了，Let's Encrypt 走 HTTP-01，
+不需要 DNS API 凭据。
+
+SSH 走密钥——自动化脚本必然高频连接，而多数 sshd 在连续密码认证后会开始拒绝：
 
 ```bash
-cp .env.example .env      # 按注释填写
+ssh-keygen -t ed25519 -f ~/.ssh/ispace_deploy -N '' -C ispace-deploy
+ssh-copy-id -i ~/.ssh/ispace_deploy.pub deploy@ispace.example.com
 ```
 
-必填的五项：`ISPACE_BASE_URL`、`ISPACE_PUBLIC_BASE`、`ISPACE_DOMAIN`、
+配置：
+
+```bash
+cp .env.example .env      # 按注释填写，然后 set -a; . ./.env; set +a
+```
+
+必填五项：`ISPACE_BASE_URL`、`ISPACE_PUBLIC_BASE`、`ISPACE_DOMAIN`、
 `TARGET_HOST`、`ISPACE_ADMIN_EMAIL`。
 
-完整步骤见 **[docs/runbooks/deployment.md](docs/runbooks/deployment.md)**，
-部署拓扑与踩过的坑见 [docs/runbooks/server-state.md](docs/runbooks/server-state.md)。
+### 1. 装 Dokploy
 
-> ⚠️ **公网部署前务必确认 `ISPACE_EMAIL_DOMAINS`。** 它是自助注册的邮箱后缀
-> 白名单，留空表示不限——而注册一次就发一个数据 schema 和一份配额。
-> 默认值 `example.com` 谁都匹配不上，也就谁都注册不了；这是有意的，
-> 宁可失败在关着的那一边。
+```bash
+export REMOTE_SUDO_PW='...'          # 目标机 sudo 口令，不落盘
+./infra/scripts/02-install-dokploy.sh
+```
+
+装完打开 `http://<服务器地址>:3000` 创建管理员账号并生成 API Token，
+连同随机会话密钥写到目标机（600，不进仓库）：
+
+```bash
+./infra/scripts/remote.sh 'umask 077; mkdir -p ~/.ispace; cat > ~/.ispace/env' <<'EOF'
+DOKPLOY_URL=http://127.0.0.1:3000
+DOKPLOY_TOKEN=刚才生成的 token
+EOF
+./infra/scripts/remote.sh "umask 077; echo SESSION_SECRET=$(openssl rand -hex 32) >> ~/.ispace/env"
+```
+
+### 2. 建目录
+
+```bash
+./infra/scripts/03-provision-dirs.sh
+```
+
+建 `/srv/sites` 与 `/srv/releases`，属主设为部署用户——必须与 compose 里
+`deploy-service` 的 `user:`（默认 `1000:1000`）一致，否则服务写不进去。
+
+### 3. 装 Supabase
+
+拉官方 compose、生成 `.env`（密钥在目标机就地生成，不经过本仓库），
+再叠上本仓库的覆盖层启动。覆盖层做三件事：清掉全部宿主端口映射、把 Kong 挂到
+Traefik 上并剥掉 `/supabase` 前缀、保留 Kong 的 `api-gw` 别名。
+逐条命令见[部署手册第 3 节](docs/runbooks/deployment.md)。
+
+```bash
+./infra/scripts/04-supabase-env.sh
+```
+
+### 4. 部署平台服务
+
+```bash
+./infra/scripts/06-deploy-service.sh    # deploy-service（REST + MCP），跑迁移
+./infra/scripts/07-deploy-caddy.sh      # 静态托管 Caddy + portal 容器
+./infra/scripts/11-deploy-web.sh        # console / portal / shell.js 产物
+./infra/scripts/08-deploy-updates.sh    # updates-service（要手机端才需要）
+```
+
+源码经 rsync 送到目标机后在那边构建镜像——比在本机构建再传镜像快得多。
+`07` 先校验 Caddyfile 再落地，校验不过绝不部署：一个语法错误会让 Caddy 起不来，
+而它是所有用户页面的出口。
+
+### 5. 验收
+
+```bash
+curl -sI "$ISPACE_BASE_URL/"                     # portal
+curl -s  "$ISPACE_BASE_URL/deploy/api/health"    # deploy-service
+curl -sI "$ISPACE_BASE_URL/console"              # 控制台
+```
+
+然后端到端走一遍：注册 → CLI 发一份产物 → `/{user}/{app}/` 能打开 →
+控制台看到发布记录 → 回滚 → 发一份含硬编码密钥的产物确认被阻断。
+
+### 6. 上线前必须确认
+
+- [ ] `ISPACE_EMAIL_DOMAINS` 已设为你自己的域名。留空 = 对全互联网开放注册
+- [ ] `ISPACE_DEV_LOGIN` **没有**设置。它是可选任意身份的开发登录页，安全性等于零
+- [ ] 证书已签发；Postgres 没有宿主端口映射；Dokploy 的 3000 不对公网开放
+- [ ] `~/.ispace/*.env` 权限是 600
+- [ ] 备份跑得通并演练过恢复（`09-backup.sh` / `10-restore-drill.sh`）
+
+### 日常运维
+
+| 场景 | 命令 |
+|---|---|
+| 开通一个用户的数据 schema | `05-provision-user-schema.sh <username>` |
+| 只改了前端 | `11-deploy-web.sh` |
+| 改了后端代码 | `06-deploy-service.sh` |
+| 备份 / 恢复演练 | `09-backup.sh` / `10-restore-drill.sh` |
+| 补一条设密码链接 | `13-issue-reset-link.sh <email>` |
+| 发安卓安装包 | `14-publish-apk.sh` |
+
+拓扑、目录、端口与踩过的坑见 [server-state.md](docs/runbooks/server-state.md)。
 
 ---
 
@@ -232,6 +407,7 @@ ai-deploy quota                   # 用量与配额
 | [iOS 构建](docs/runbooks/ios-build.md) | 手机壳的 iOS 出包 |
 | [页面包配置](docs/guides/page-bundle-config.md) | `app.json` 声明格式 |
 | [明文 HTTP 的代价](apps/mobile-shell/CLEARTEXT.md) | 安全上下文与原生开关 |
+| [Supabase 子路径部署实测](infra/dokploy/supabase.notes.md) | Kong stripPrefix 与 schema 热加载 |
 
 ---
 

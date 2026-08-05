@@ -55,7 +55,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#fb923c"
       },
-      "versionCode": 2
+      "versionCode": 3
     },
     "splash": {
       "image": "./assets/splash-icon.png",
