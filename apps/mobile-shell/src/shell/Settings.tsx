@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { checkShellUpdate, type ShellRelease } from '../runtime/shell-update';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   openSystemSettings, permissionStates, setCapabilityEnabled,
@@ -47,6 +48,9 @@ const CAP_LABEL: Record<Capability, { name: string; why: string }> = {
 export function Settings(p: SettingsProps) {
   const insets = useSafeAreaInsets();
   const [perms, setPerms] = useState<PermissionState[]>([]);
+  /** 壳的新版本。查不到（老壳没有那个原生模块、或没网）就一直是 null。 */
+  const [shellUp, setShellUp] = useState<ShellRelease | null>(null);
+  useEffect(() => { void checkShellUpdate().then(setShellUp); }, []);
   const v = versionInfo();
 
   const loadPerms = () => void permissionStates().then(setPerms);
@@ -79,6 +83,27 @@ export function Settings(p: SettingsProps) {
           里的一个 tab，两者并存，这个开关对用户已经没有任何可观察的效果——
           留着只会让人问"我该选哪个"。
         */}
+
+        {/*
+          壳自身的新版本。页面包更新是静默的，壳不行——近百 MB、必须用户
+          确认安装，所以做成一张能看清"要下多大、更到哪一版"的卡片，
+          而不是一个悄悄出现的角标。
+        */}
+        {shellUp && (
+          <Pressable style={styles.shellCard} onPress={() => void Linking.openURL(shellUp.url)}>
+            {/*
+              标题不写 versionName：它长期是 1.0.0，写出来就成了
+              「有新版本 1.0.0」而用户当前装的也是 1.0.0，看着像出错。
+              真正在变的是构建号，把两个都摆出来才说得清新在哪。
+            */}
+            <Text style={styles.shellTitle}>App 有新版本可以装</Text>
+            <Text style={styles.shellBody}>
+              你现在是构建 {shellUp.installed}，最新是构建 {shellUp.versionCode}。
+              点这里下载安装（{(shellUp.sizeBytes / 1048576).toFixed(0)} MB），
+              装完你做的页面和设置都还在。
+            </Text>
+          </Pressable>
+        )}
 
         {/* ── 更新 ─────────────────────────────────────────────── */}
         <Section title="更新">
@@ -219,6 +244,12 @@ const C = {
 };
 
 const styles = StyleSheet.create({
+  shellCard: {
+    backgroundColor: '#fff7ed', borderRadius: 14, padding: 14, marginBottom: 16,
+    borderWidth: 1, borderColor: '#fed7aa', gap: 5,
+  },
+  shellTitle: { fontSize: 15, fontWeight: '700', color: '#9a3412' },
+  shellBody: { fontSize: 12.5, color: '#9a3412', lineHeight: 19, opacity: 0.85 },
   root: { flex: 1, backgroundColor: C.canvas },
   head: {
     flexDirection: 'row', alignItems: 'center',

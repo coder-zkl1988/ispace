@@ -13,6 +13,7 @@
   "dependencies": {
     "@ispace/contracts": "workspace:*",
     "expo": "~54.0.0",
+    "expo-application": "^57.0.2",
     "expo-av": "~16.0.0",
     "expo-build-properties": "^1.0.10",
     "expo-camera": "~17.0.0",
