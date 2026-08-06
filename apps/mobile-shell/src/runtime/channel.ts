@@ -52,6 +52,14 @@ function currentBundleVersion(): number | undefined {
  * └──────────────────────────────────────────────────────────────────────┘
  */
 
+/** 超时就返回 null，让调用方按"这次没有"处理，而不是无限等下去。 */
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    p,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export type LoadPhase =
   | { kind: 'idle' }
   | { kind: 'switching' }
@@ -94,8 +102,17 @@ export async function switchToUserChannel(opts: SwitchOptions): Promise<boolean>
 
     await Updates.setUpdateRequestHeadersOverride(headers);
 
+    /*
+      给检查与下载各加一个上限。
+
+      expo-updates 的这两个调用在网络半死不活时会长时间不返回（不是抛错，
+      就是不回），而调用方处于一屏全屏加载界面——用户被卡在门口进不去。
+      超时就当"这次没更新"，照常用手上这版：更新是锦上添花，
+      不该成为进入 App 的必经关卡。
+    */
     phase({ kind: 'checking' });
-    const check = await Updates.checkForUpdateAsync();
+    const check = await withTimeout(Updates.checkForUpdateAsync(), 15_000);
+    if (!check) { phase({ kind: 'up-to-date' }); return false; }
 
     if (!check.isAvailable) {
       phase({ kind: 'up-to-date' });
@@ -103,8 +120,8 @@ export async function switchToUserChannel(opts: SwitchOptions): Promise<boolean>
     }
 
     phase({ kind: 'downloading' });
-    const fetched = await Updates.fetchUpdateAsync();
-    if (!fetched.isNew) {
+    const fetched = await withTimeout(Updates.fetchUpdateAsync(), 60_000);
+    if (!fetched || !fetched.isNew) {
       phase({ kind: 'up-to-date' });
       return false;
     }
@@ -160,10 +177,22 @@ export async function checkQuietly(): Promise<{ available: boolean }> {
 /** 下载并重载。设计稿更新卡片「立即重载」的落点。 */
 export async function applyUpdate(onPhase?: (p: LoadPhase) => void): Promise<void> {
   const phase = onPhase ?? (() => {});
-  phase({ kind: 'downloading' });
-  await Updates.fetchUpdateAsync();
-  phase({ kind: 'reloading' });
-  await Updates.reloadAsync();
+  /*
+    必须包 try/catch。
+
+    调用方是 `void applyUpdate(setPhase)`——一旦这里抛出，拒绝没人接，
+    而 phase 永远停在 'downloading'，而那是一屏**全屏、无出口**的加载界面。
+    用户的观感是「点了更新就卡死在下载页」，只能杀进程。
+    实测就是这么发生的。
+  */
+  try {
+    phase({ kind: 'downloading' });
+    await Updates.fetchUpdateAsync();
+    phase({ kind: 'reloading' });
+    await Updates.reloadAsync();
+  } catch (e) {
+    phase({ kind: 'failed', message: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 /**

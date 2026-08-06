@@ -254,7 +254,7 @@ function Root() {
   }
 
   if (phase.kind !== 'idle' && phase.kind !== 'up-to-date' && phase.kind !== 'failed') {
-    return <LoadingScreen phase={phase} />;
+    return <LoadingScreen phase={phase} onCancel={() => setPhase({ kind: 'idle' })} />;
   }
 
   const bundle = getPageBundle();
@@ -852,7 +852,19 @@ async function pollForToken(pairingId: string): Promise<string | null> {
 }
 
 // ── 加载中（设计稿：就地显示加载进度，不外露通道细节）──────────────
-function LoadingScreen({ phase }: { phase: LoadPhase }) {
+function LoadingScreen({ phase, onCancel }: { phase: LoadPhase; onCancel?: () => void }) {
+  /*
+    等久了给一个出口。
+
+    这一屏是全屏的：网络慢、服务端抽风、或者上面那层抛了异常没人接，
+    用户就被永久困在这儿，只能杀进程。12 秒之后露出「先不更新」——
+    更新是锦上添花，不该成为进入 App 的必经关卡。
+  */
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 12_000);
+    return () => clearTimeout(t);
+  }, []);
   const text =
     phase.kind === 'switching' ? '正在准备你的应用'
     : phase.kind === 'checking' ? '正在检查更新'
@@ -862,6 +874,11 @@ function LoadingScreen({ phase }: { phase: LoadPhase }) {
     <View style={s.center}>
       <ActivityIndicator color="#fb923c" />
       <Text style={[s.body, { marginTop: 14 }]}>{text}</Text>
+      {slow && onCancel && (
+        <Pressable style={[s.btn, { marginTop: 18 }]} onPress={onCancel}>
+          <Text style={s.body}>先不更新，直接进去</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
