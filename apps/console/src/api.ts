@@ -303,6 +303,11 @@ export const api = {
     authKind: ConnectorRow['authKind'];
     authName?: string; secret?: string; catalogId?: string; shared: boolean;
   }) => req<{ connector: ConnectorRow }>('/connectors', { method: 'POST', body: JSON.stringify(body) }),
+  /** 管理员：全平台的连接器，含每个人自建的。用来回答"谁开了通往哪里的口子"。 */
+  adminConnectors: () =>
+    req<{ connectors: (ConnectorRow & { owner: string | null })[]; allowPrivate: boolean }>(
+      '/admin/connectors',
+    ),
   deleteConnector: (id: string) =>
     req<{ ok: true }>(`/connectors/${id}`, { method: 'DELETE' }),
   dataConnection: () => req<DataConnection>('/data/connection'),

@@ -40,10 +40,10 @@ export function Connectors({ me }: { me: Me }) {
   };
   useEffect(load, []);
 
-  const pick = (c: CatalogEntry, shared = false) => {
+  const pick = (c: CatalogEntry) => {
     setForm({
       slug: c.id, name: c.name, baseUrl: c.baseUrl, authKind: c.authKind,
-      authName: c.authName ?? '', secret: '', catalogId: c.id, shared,
+      authName: c.authName ?? '', secret: '', catalogId: c.id, shared: false,
     });
     setOpen(true);
   };
@@ -55,10 +55,10 @@ export function Connectors({ me }: { me: Me }) {
    * 找到一个复选框。那个位置没人找得到——"在哪里配公共连接器"会变成一个
    * 需要问人的问题，而这个平台的目的正是让人不必问人。
    */
-  const blank = (shared: boolean) => {
+  const blank = () => {
     setForm({
       slug: '', name: '', baseUrl: '', authKind: 'none',
-      authName: '', secret: '', catalogId: '', shared,
+      authName: '', secret: '', catalogId: '', shared: false,
     });
     setOpen(true);
   };
@@ -124,10 +124,7 @@ export function Connectors({ me }: { me: Me }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <b>已登记</b>
           <div style={{ display: 'flex', gap: 8 }}>
-            {me.user.role === 'admin' && (
-              <Button onClick={() => blank(true)}>发布全员共享的</Button>
-            )}
-            <Button onClick={() => blank(false)}>手动登记一个</Button>
+            <Button onClick={blank}>手动登记一个</Button>
           </div>
         </div>
 
@@ -177,9 +174,9 @@ export function Connectors({ me }: { me: Me }) {
                         {r.callCount > 0 ? `${r.callCount} 次` : '还没有'}
                       </td>
                       <td style={{ padding: '10px 0', whiteSpace: 'nowrap' }}>
-                        {(!r.shared || me.user.role === 'admin') && (
-                          <Button onClick={() => remove(r)}>删除</Button>
-                        )}
+                        {/* 共享的只能在「平台连接器」那一屏删——删一条全公司在用的
+                            东西，不该是在自己这一屏顺手就点到的 */}
+                        {!r.shared && <Button onClick={() => remove(r)}>删除</Button>}
                       </td>
                     </tr>
                   );
@@ -208,10 +205,8 @@ export function Connectors({ me }: { me: Me }) {
         open={open}
         onClose={() => setOpen(false)}
         width={560}
-        title={form.shared ? '发布全员共享的连接器' : '登记一个连接器'}
-        description={form.shared
-          ? '所有人都能调用，但看不到凭据。公司统一采购的 key 用这个。'
-          : '凭据交给平台加密保管，页面代码里不出现密钥。'}
+        title="登记一个连接器"
+        description="只有你自己能调用。凭据交给平台加密保管，页面代码里不出现密钥。"
         footer={(
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <Button onClick={() => setOpen(false)}>取消</Button>
@@ -268,15 +263,6 @@ export function Connectors({ me }: { me: Me }) {
                 onChange={(e) => setForm({ ...form, secret: e.target.value })} />
             </label>
           )}
-          {me.user.role === 'admin' && (
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="checkbox" checked={form.shared}
-                onChange={(e) => setForm({ ...form, shared: e.target.checked })} />
-              <span style={{ fontSize: 13 }}>
-                发布为全员共享——所有人都能调用，但看不到凭据。公司统一采购的 key 用这个。
-              </span>
-            </label>
-          )}
         </div>
       </Dialog>
 
@@ -321,14 +307,9 @@ export function Connectors({ me }: { me: Me }) {
                   复制调用地址
                 </Button>
               ) : (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {me.user.role === 'admin' && !installed.has(c.id) && (
-                    <Button onClick={() => pick(c, true)}>发布为全员</Button>
-                  )}
-                  <Button onClick={() => pick(c)} disabled={installed.has(c.id)}>
-                    {installed.has(c.id) ? '已登记' : '登记给自己'}
-                  </Button>
-                </div>
+                <Button onClick={() => pick(c)} disabled={installed.has(c.id)}>
+                  {installed.has(c.id) ? '已登记' : '登记'}
+                </Button>
               )}
             </div>
           ))}

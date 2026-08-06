@@ -94,6 +94,25 @@ function Space() {
           location.replace(safeRedirect() ?? `/${m.user.username}/`);
           return;
         }
+        /*
+          路径上是别人的名字。
+
+          此前这里什么都不做，结果是：标题写着「张三 的页面」，底下列的却是
+          **你自己**的应用——因为 api.apps() 压根没有用户名参数，它返回的永远
+          是当前会话这个人的东西。同时 isOwner 为 false 又把「同事分享给我的」
+          整段藏掉，看起来像卡片凭空消失了。
+
+          界面撒谎比缺功能糟糕得多：它让人怀疑数据出了问题，而实际上数据好好的。
+
+          「逛别人的空间」目前不是这个产品里的概念——看别人做了什么走创意市场，
+          单个页面走分享，两条路都有真实的访问控制。所以这里不假装，直接把人
+          送回自己的空间。真要做这个功能，需要一个"按访问者可见性过滤某人页面"
+          的服务端端点，那是另一件事。
+        */
+        if (owner !== m.user.username) {
+          location.replace(`/${m.user.username}/`);
+          return;
+        }
         const [a, s, i] = await Promise.all([
           api.apps(),
           api.pendingShares().catch(() => ({ shares: [] })),

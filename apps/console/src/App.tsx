@@ -17,6 +17,7 @@ import { Guide } from './screens/Guide';
 import { AdminOverviewScreen } from './screens/AdminOverview';
 import { AdminUsers } from './screens/AdminUsers';
 import { AdminTokens } from './screens/AdminTokens';
+import { AdminConnectors } from './screens/AdminConnectors';
 import { AdminSettings } from './screens/AdminSettings';
 import { AdminResources } from './screens/AdminResources';
 import { AdminAudit } from './screens/AdminAudit';
@@ -39,6 +40,7 @@ type EmployeeScreen =
   | 'mobile' | 'quota' | 'audit' | 'guide';
 type AdminScreen =
   | 'a-overview' | 'a-users' | 'a-tokens'
+  | 'a-connectors'
   | 'a-resources' | 'a-settings' | 'a-audit' | 'a-inspection';
 type Screen = EmployeeScreen | AdminScreen;
 
@@ -73,6 +75,7 @@ const ADMIN_NAV: { group: string; items: { key: AdminScreen; label: string; icon
       { key: 'a-overview', label: '平台总览', icon: 'home' },
       { key: 'a-users', label: '员工与开通', icon: 'userPlus' },
       { key: 'a-tokens', label: '访问令牌', icon: 'key' },
+      { key: 'a-connectors', label: '平台连接器', icon: 'zap' },
     ],
   },
   {
@@ -172,6 +175,7 @@ function Screens({ screen, me }: { screen: Screen; me: Me }) {
     case 'a-overview':   return <AdminOverviewScreen />;
     case 'a-users':      return <AdminUsers />;
     case 'a-tokens':     return <AdminTokens />;
+    case 'a-connectors': return <AdminConnectors />;
     case 'a-resources':  return <AdminResources />;
     case 'a-settings':   return <AdminSettings />;
     case 'a-audit':      return <AdminAudit />;
