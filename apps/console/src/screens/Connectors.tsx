@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Card, Input, PageTitle, Select, copyText } from '@ispace/ui';
+import { Badge, Button, Card, Dialog, Input, PageTitle, Select, copyText } from '@ispace/ui';
 import { api, type CatalogEntry, type ConnectorRow, type Me } from '../api';
 
 /**
@@ -125,13 +125,9 @@ export function Connectors({ me }: { me: Me }) {
           <b>已登记</b>
           <div style={{ display: 'flex', gap: 8 }}>
             {me.user.role === 'admin' && (
-              <Button onClick={() => (open ? setOpen(false) : blank(true))}>
-                发布全员共享的
-              </Button>
+              <Button onClick={() => blank(true)}>发布全员共享的</Button>
             )}
-            <Button onClick={() => (open ? setOpen(false) : blank(false))}>
-              {open ? '收起' : '手动登记一个'}
-            </Button>
+            <Button onClick={() => blank(false)}>手动登记一个</Button>
           </div>
         </div>
 
@@ -201,74 +197,88 @@ export function Connectors({ me }: { me: Me }) {
         )}
       </Card>
 
-      {/* ── 新建表单 ───────────────────────────────────────────── */}
-      {open && (
-        <Card>
-          <b>登记一个连接器</b>
-          <div style={{ display: 'grid', gap: 10, marginTop: 12, maxWidth: 560 }}>
+      {/* ── 新建表单：弹窗 ─────────────────────────────────────── */}
+      {/*
+        原先是就地展开一张卡片。问题是它长在「已登记」和目录中间，展开后把
+        目录整个推下去——用户点「登记」的动机往往正来自目录里的某一条，结果
+        一点就看不见那一条了，还得往回滚去核对填的是不是同一个。
+        弹窗把这一步隔离出来：背景还在原位，填完关掉，视线不用重新找。
+      */}
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        width={560}
+        title={form.shared ? '发布全员共享的连接器' : '登记一个连接器'}
+        description={form.shared
+          ? '所有人都能调用，但看不到凭据。公司统一采购的 key 用这个。'
+          : '凭据交给平台加密保管，页面代码里不出现密钥。'}
+        footer={(
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button variant="primary" disabled={saving || !form.slug || !form.baseUrl} onClick={submit}>
+              {saving ? '登记中…' : '登记'}
+            </Button>
+          </div>
+        )}
+      >
+        <div style={{ display: 'grid', gap: 10 }}>
+          <label>
+            <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>短名（页面里用它拼地址）</div>
+            <Input value={form.slug} placeholder="amap"
+              onChange={(e) => setForm({ ...form, slug: e.target.value })} />
+          </label>
+          <label>
+            <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>名字</div>
+            <Input value={form.name} placeholder="高德地图"
+              onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </label>
+          <label>
+            <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>
+              上游根地址——同时是白名单，代理只允许访问它下面的路径，填得越具体越安全
+            </div>
+            <Input value={form.baseUrl} placeholder="https://restapi.amap.com/v3"
+              onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} />
+          </label>
+          <label>
+            <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>凭据怎么带</div>
+            <Select
+              value={form.authKind}
+              onChange={(v) => setForm({ ...form, authKind: v })}
+              items={[
+                { value: 'none', label: '不需要凭据' },
+                { value: 'query', label: '拼在查询串里（高德、和风）' },
+                { value: 'header', label: '放在自定义请求头' },
+                { value: 'bearer', label: 'Authorization: Bearer' },
+              ]}
+            />
+          </label>
+          {(form.authKind === 'query' || form.authKind === 'header') && (
             <label>
-              <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>短名（页面里用它拼地址）</div>
-              <Input value={form.slug} placeholder="amap"
-                onChange={(e) => setForm({ ...form, slug: e.target.value })} />
+              <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>参数名</div>
+              <Input value={form.authName} placeholder={form.authKind === 'query' ? 'key' : 'X-API-Key'}
+                onChange={(e) => setForm({ ...form, authName: e.target.value })} />
             </label>
-            <label>
-              <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>名字</div>
-              <Input value={form.name} placeholder="高德地图"
-                onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </label>
+          )}
+          {form.authKind !== 'none' && (
             <label>
               <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>
-                上游根地址——同时是白名单，代理只允许访问它下面的路径，填得越具体越安全
+                凭据——存进去就读不回来了，自己另存一份
               </div>
-              <Input value={form.baseUrl} placeholder="https://restapi.amap.com/v3"
-                onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} />
+              <Input type="password" value={form.secret} autoComplete="off"
+                onChange={(e) => setForm({ ...form, secret: e.target.value })} />
             </label>
-            <label>
-              <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>凭据怎么带</div>
-              <Select
-                value={form.authKind}
-                onChange={(v) => setForm({ ...form, authKind: v })}
-                items={[
-                  { value: 'none', label: '不需要凭据' },
-                  { value: 'query', label: '拼在查询串里（高德、和风）' },
-                  { value: 'header', label: '放在自定义请求头' },
-                  { value: 'bearer', label: 'Authorization: Bearer' },
-                ]}
-              />
+          )}
+          {me.user.role === 'admin' && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="checkbox" checked={form.shared}
+                onChange={(e) => setForm({ ...form, shared: e.target.checked })} />
+              <span style={{ fontSize: 13 }}>
+                发布为全员共享——所有人都能调用，但看不到凭据。公司统一采购的 key 用这个。
+              </span>
             </label>
-            {(form.authKind === 'query' || form.authKind === 'header') && (
-              <label>
-                <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>参数名</div>
-                <Input value={form.authName} placeholder={form.authKind === 'query' ? 'key' : 'X-API-Key'}
-                  onChange={(e) => setForm({ ...form, authName: e.target.value })} />
-              </label>
-            )}
-            {form.authKind !== 'none' && (
-              <label>
-                <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>
-                  凭据——存进去就读不回来了，自己另存一份
-                </div>
-                <Input type="password" value={form.secret} autoComplete="off"
-                  onChange={(e) => setForm({ ...form, secret: e.target.value })} />
-              </label>
-            )}
-            {me.user.role === 'admin' && (
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input type="checkbox" checked={form.shared}
-                  onChange={(e) => setForm({ ...form, shared: e.target.checked })} />
-                <span style={{ fontSize: 13 }}>
-                  发布为全员共享——所有人都能调用，但看不到凭据。公司统一采购的 key 用这个。
-                </span>
-              </label>
-            )}
-            <div>
-              <Button variant="primary" disabled={saving || !form.slug || !form.baseUrl} onClick={submit}>
-                {saving ? '登记中…' : '登记'}
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
+          )}
+        </div>
+      </Dialog>
 
       {/* ── 目录 ───────────────────────────────────────────────── */}
       <div style={{ marginTop: 16 }} />
@@ -307,9 +317,9 @@ export function Connectors({ me }: { me: Me }) {
                 </div>
               </div>
               {c.authKind === 'none' ? (
-                <Button onClick={() => void navigator.clipboard?.writeText(
-                  `/deploy/api/connect/${c.id}${c.example}`,
-                )}>复制调用地址</Button>
+                <Button onClick={() => void copyText(`/deploy/api/connect/${c.id}${c.example}`)}>
+                  复制调用地址
+                </Button>
               ) : (
                 <div style={{ display: 'flex', gap: 8 }}>
                   {me.user.role === 'admin' && !installed.has(c.id) && (

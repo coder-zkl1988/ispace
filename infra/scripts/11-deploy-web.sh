@@ -16,6 +16,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HOST="${TARGET_HOST:?需要设置 TARGET_HOST，形如 deploy@ispace.example.com}"
 KEY="${DEPLOY_KEY:-$HOME/.ssh/ispace_deploy}"
 BASE_URL="${ISPACE_BASE_URL:?需要设置 ISPACE_BASE_URL，形如 https://ispace.example.com}"
+# 冒烟走目标机内部 + Host 头，所以只要域名，不要协议
+DOMAIN="${ISPACE_DOMAIN:-${BASE_URL#*://}}"
 
 SSH_OPTS=(-i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 RSH="/usr/bin/ssh ${SSH_OPTS[*]}"
@@ -44,11 +46,21 @@ rsync -az --delete -e "$RSH" "$REPO_ROOT/apps/portal/dist/"  "$HOST:/srv/portal/
 rsync -az -e "$RSH" "$REPO_ROOT/apps/shell-js/dist/shell.js" "$HOST:/srv/platform/shell.js"
 
 echo "== 3. 冒烟 =="
+# 从**目标机内部**打，不从跑脚本这台机器打。
+#
+# 原先直接 curl $BASE_URL：那要求运维的笔记本此刻能解析并访问平台公网地址。
+# 通过 VPN 部署、或者 TLS 由上游网关终结而本机不在网关内侧时，这里稳定返回
+# 000——一个永远失败的检查比没有检查更糟，它训练人忽略输出，真出问题那次
+# 也就跟着被忽略了。走 remote.sh + Host 头，验的是"服务器上这个站点是好的"，
+# 这本来就是部署脚本该负责的范围；公网链路是网关的事，不该混进来。
+smoke() {
+  "$SCRIPT_DIR/remote.sh" "bash -s" <<SMOKE
+set -eu
 fail=0
 for p in / /console/ /platform/shell.js; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE_URL$p" || echo 000)
-  printf '   %-22s %s\n' "$p" "$code"
-  [ "$code" = "200" ] || fail=1
+  code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H 'Host: $DOMAIN' "http://127.0.0.1\$p" || echo 000)
+  printf '   %-22s %s\\n' "\$p" "\$code"
+  [ "\$code" = "200" ] || fail=1
 done
 
 # 控制台是 SPA，index.html 必须真的引到本次构建的 JS，
@@ -56,15 +68,20 @@ done
 # 打印**实际请求的那个路径**而不是 grep 出来的片段：控制台资源在
 # /console/assets/ 下，而 /assets/ 会被 portal 的 SPA 兜底成 200+HTML。
 # 两者只差一个前缀，日志里印错一个就足以让人拿着 200 去查一个不存在的问题。
-asset=$(curl -s --max-time 20 "$BASE_URL/console/" | grep -oE '/assets/[^"]+\.js' | head -1)
-if [ -n "$asset" ]; then
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE_URL/console$asset" || echo 000)
-  printf '   %-22s %s\n' "/console$asset" "$code"
-  [ "$code" = "200" ] || fail=1
+asset=\$(curl -s --max-time 20 -H 'Host: $DOMAIN' "http://127.0.0.1/console/" | grep -oE '/assets/[^"]+\\.js' | head -1)
+if [ -n "\$asset" ]; then
+  code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H 'Host: $DOMAIN' "http://127.0.0.1/console\$asset" || echo 000)
+  printf '   %-22s %s\\n' "/console\$asset" "\$code"
+  [ "\$code" = "200" ] || fail=1
 else
   echo "   控制台 index.html 里找不到 JS 引用" >&2
   fail=1
 fi
+exit \$fail
+SMOKE
+}
+fail=0
+smoke || fail=1
 
 [ "$fail" = "0" ] || { echo "冒烟未通过" >&2; exit 1; }
 echo "部署完成"
