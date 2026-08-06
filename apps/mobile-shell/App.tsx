@@ -16,6 +16,7 @@ import { WebPage, type WebPageTarget } from './src/shell/WebPage';
 import { Market } from './src/shell/Market';
 
 import { ShellTabs, type ShellTab } from './src/shell/ShellTabs';
+import { checkShellUpdate } from './src/runtime/shell-update';
 import { API_BASE, DISPLAY_HOST } from './src/config';
 import {
   applyUpdate, checkQuietly, rollbackToPrevious,
@@ -105,6 +106,14 @@ function Root() {
   const [webApps, setWebApps] = useState<LaunchItem[]>([]);
   const [loadingApps, setLoadingApps] = useState(false);
   const [kbUp, setKbUp] = useState(false);
+  /*
+    横幅收起只对本次启动生效，不落盘：用户按 ✕ 是"现在别烦我"，
+    不是"这个版本我永远不要"。下次回前台照常再提。
+  */
+  const [bannerHidden, setBannerHidden] = useState(false);
+  /** 壳（APK）有没有新版。只用来在「我」那格点一个点。 */
+  const [shellUp, setShellUp] = useState(false);
+  useEffect(() => { void checkShellUpdate().then((r) => setShellUp(Boolean(r))); }, []);
   /*
     首页默认打开哪个页面。
 
@@ -205,7 +214,10 @@ function Root() {
    * 用户下一次要用它的时刻，此时提示最有意义。
    */
   const check = useCallback(() => {
-    void checkQuietly().then((r) => setUpdateReady(r.available));
+    void checkQuietly().then((r) => {
+      setUpdateReady(r.available);
+      if (r.available) setBannerHidden(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -306,7 +318,13 @@ function Root() {
             if (t) { setEditTarget(t); setView({ kind: 'chat' }); }
           }}
         />
-        <ShellTabs active="works" onChange={goTab} />
+        <ShellTabs
+          active="works" onChange={goTab}
+          pageUpdate={updateReady && !bannerHidden}
+          onApplyPageUpdate={() => void applyUpdate(setPhase)}
+          onDismissPageUpdate={() => setBannerHidden(true)}
+          shellUpdate={shellUp}
+        />
       </View>
     );
   }
@@ -315,7 +333,13 @@ function Root() {
     return (
       <View style={{ flex: 1 }}>
         <Market token={token} onChanged={() => void loadWebApps()} />
-        <ShellTabs active="market" onChange={goTab} />
+        <ShellTabs
+          active="market" onChange={goTab}
+          pageUpdate={updateReady && !bannerHidden}
+          onApplyPageUpdate={() => void applyUpdate(setPhase)}
+          onDismissPageUpdate={() => setBannerHidden(true)}
+          shellUpdate={shellUp}
+        />
       </View>
     );
   }
@@ -360,7 +384,13 @@ function Root() {
           onLogout={() => { setMe(null); setView({ kind: 'home' }); }}
           onClose={() => goTab('home')}
         />
-        <ShellTabs active="me" onChange={goTab} />
+        <ShellTabs
+          active="me" onChange={goTab}
+          pageUpdate={updateReady && !bannerHidden}
+          onApplyPageUpdate={() => void applyUpdate(setPhase)}
+          onDismissPageUpdate={() => setBannerHidden(true)}
+          shellUpdate={shellUp}
+        />
       </View>
     );
   }
@@ -370,7 +400,13 @@ function Root() {
       <View style={{ flex: 1 }}>
         {/* 首页是根：不给返回键，出口是底下那条 tab */}
         <WebPage target={{ path: homeItem.path, title: homeItem.name }} token={token} />
-        <ShellTabs active="home" onChange={goTab} />
+        <ShellTabs
+          active="home" onChange={goTab}
+          pageUpdate={updateReady && !bannerHidden}
+          onApplyPageUpdate={() => void applyUpdate(setPhase)}
+          onDismissPageUpdate={() => setBannerHidden(true)}
+          shellUpdate={shellUp}
+        />
       </View>
     );
   }
@@ -395,8 +431,8 @@ function Root() {
       appJson={config}
       // 首页有底部栏，设置走「我」；进到页面内容里没有 tab，才需要齿轮
       {...(view.kind === 'screen' || soloPage ? { onOpenSettings: () => goTab('me') } : {})}
-      hasUpdate={updateReady}
-      onApplyUpdate={() => void applyUpdate(setPhase)}
+      // 更新提示统一收到底栏那条横幅：四个 tab 都看得到，
+      // 不必在页面右上角再挤一枚药丸，底部也不必再压一张卡
       {...(view.kind === 'screen' ? { onBack: () => setView({ kind: 'home' }) } : {})}
     >
       {/*
@@ -421,18 +457,14 @@ function Root() {
         单页应用（soloPage）也保留这条：它没有启动器，市场就成了到不了的
         地方，而那正是他去看别人做了什么的唯一入口。
       */}
-      {view.kind === 'home' && <ShellTabs active="home" onChange={goTab} />}
+      {view.kind === 'home' && <ShellTabs
+          active="home" onChange={goTab}
+          pageUpdate={updateReady && !bannerHidden}
+          onApplyPageUpdate={() => void applyUpdate(setPhase)}
+          onDismissPageUpdate={() => setBannerHidden(true)}
+          shellUpdate={shellUp}
+        />}
 
-      {updateReady && (
-        <UpdateCard
-          bundleVersion={0}
-          runtimeVersion={v.runtimeVersion}
-          rolloutPercent={100}
-          notes={['你的应用有新版本']}
-          onLater={() => setUpdateReady(false)}
-          onReload={() => void applyUpdate(setPhase)}
-        />
-      )}
     </ShellChrome>
   );
 }

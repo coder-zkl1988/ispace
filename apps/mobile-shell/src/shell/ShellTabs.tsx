@@ -25,10 +25,41 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 export type ShellTab = 'home' | 'works' | 'market' | 'me';
 
 export function ShellTabs({
-  active, onChange,
-}: { active: ShellTab; onChange: (t: ShellTab) => void }) {
+  active, onChange, pageUpdate, onApplyPageUpdate, onDismissPageUpdate, shellUpdate,
+}: {
+  active: ShellTab;
+  onChange: (t: ShellTab) => void;
+  /**
+   * 页面包有新版。做成通栏横幅、就地更新——它只有几 MB，一点就好，
+   * 改的又正是用户此刻在看的东西，值得一个一步可达的入口。
+   */
+  pageUpdate?: boolean;
+  onApplyPageUpdate?: () => void;
+  onDismissPageUpdate?: () => void;
+  /**
+   * 壳有新版。只在「我」那一格挂个点，不出横幅——91 MB、要走系统装机、
+   * 还得用户确认，不紧急。打扰程度要跟代价匹配。
+   */
+  shellUpdate?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   return (
+    <View>
+    {pageUpdate && onApplyPageUpdate && (
+      <Pressable style={s.banner} onPress={onApplyPageUpdate}>
+        <View style={s.bannerDot} />
+        <Text style={s.bannerText}>你的应用有新版</Text>
+        <Text style={s.bannerAction}>立即更新</Text>
+        <Pressable
+          hitSlop={12}
+          onPress={onDismissPageUpdate}
+          accessibilityLabel="收起更新提示"
+          style={s.bannerClose}
+        >
+          <Text style={s.bannerCloseText}>✕</Text>
+        </Pressable>
+      </Pressable>
+    )}
     <View style={[s.bar, { paddingBottom: insets.bottom || 8 }]}>
       <Item label="首页" active={active === 'home'} onPress={() => onChange('home')}>
         <HomeGlyph on={active === 'home'} />
@@ -39,17 +70,21 @@ export function ShellTabs({
       <Item label="创意集市" active={active === 'market'} onPress={() => onChange('market')}>
         <SparkGlyph on={active === 'market'} />
       </Item>
-      <Item label="我" active={active === 'me'} onPress={() => onChange('me')}>
+      <Item label="我" active={active === 'me'} onPress={() => onChange('me')} dot={shellUpdate}>
         <MeGlyph on={active === 'me'} />
       </Item>
+    </View>
     </View>
   );
 }
 
 function Item({
-  label, active, onPress, children,
+  label, active, onPress, children, dot,
 }: {
-  label: string; active: boolean; onPress: () => void; children: React.ReactNode;
+  label: string; active: boolean; onPress: () => void;
+  children: React.ReactNode;
+  /** 「有事但不急」的通用语言：一个点，不占布局、不说话。 */
+  dot?: boolean;
 }) {
   return (
     <Pressable
@@ -59,7 +94,10 @@ function Item({
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}
     >
-      {children}
+      <View>
+        {children}
+        {dot && <View style={s.itemDot} />}
+      </View>
       <Text style={[s.label, active && s.labelOn]}>{label}</Text>
     </Pressable>
   );
@@ -125,6 +163,20 @@ const s = StyleSheet.create({
     backgroundColor: '#fff', paddingTop: 8,
   },
   item: { flex: 1, alignItems: 'center', gap: 3 },
+  itemDot: {
+    position: 'absolute', top: -1, right: -2,
+    width: 7, height: 7, borderRadius: 4, backgroundColor: ON,
+    borderWidth: 1.5, borderColor: '#fff',
+  },
+  banner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    height: 36, paddingHorizontal: 14, backgroundColor: ON,
+  },
+  bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' },
+  bannerText: { flex: 1, color: '#fff', fontSize: 12.5 },
+  bannerAction: { color: '#fff', fontSize: 12.5, fontWeight: '700' },
+  bannerClose: { paddingLeft: 10 },
+  bannerCloseText: { color: 'rgba(255,255,255,.85)', fontSize: 13 },
   // 「我的作品」「创意集市」都是四个字，10.5 在窄屏上会换行
   label: { fontSize: 10, color: OFF },
   labelOn: { color: ON, fontWeight: '600' },
