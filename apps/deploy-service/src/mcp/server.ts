@@ -34,6 +34,9 @@ import { ConnectorKeyMissing, encryptSecret } from '../services/connector-secret
 import { assertOutboundAllowed, OutboundBlocked } from '../services/outbound-guard.js';
 import { createBackend } from '../services/backend.js';
 import { publishMobileBundle } from '../services/mobile-publish.js';
+import {
+  availableFromRows, describeForModel, type ConnectorRow,
+} from '../services/connectors-available.js';
 import { deleteApp } from '../services/app-delete.js';
 import type { Orchestrator } from '@ispace/orchestrator';
 import type { DeployService } from '../services/deploy.js';
@@ -132,6 +135,23 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
    */
   const MCP_BODY_LIMIT = 48 * 1024 * 1024;
 
+
+  /**
+   * 这个人能用的连接器，拼成一段给模型读的说明。
+   *
+   * 两处用它：initialize.instructions（外部 agent 的"系统提示"）与
+   * list-connectors 的返回。拼装逻辑在 services/connectors-available.ts，
+   * 与平台自带 Agent 共用同一份——两边说法不一致时模型会摇摆。
+   */
+  async function connectorBrief(userId: string): Promise<string> {
+    const rows = await sql<ConnectorRow[]>`
+      SELECT slug, name, catalog_id, user_id FROM ispace.connectors
+       WHERE user_id = ${userId} OR user_id IS NULL
+       ORDER BY user_id IS NULL, slug
+    `;
+    return describeForModel(availableFromRows(rows));
+  }
+
   app.post('/deploy/mcp', { bodyLimit: MCP_BODY_LIMIT }, async (req, reply) => {
     const body = req.body as JsonRpcRequest;
     const respond = (result: unknown) =>
@@ -141,12 +161,29 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
 
     try {
       switch (body.method) {
-        case 'initialize':
+        case 'initialize': {
+          /*
+            带上 instructions：客户端会把它交给模型当上下文，模型不必先想到
+            去调 list-connectors 就已经知道有哪些数据源可用。见 connectorBrief。
+
+            这里的鉴权失败**不能**让握手失败——没带令牌也应该连得上（只是拿不到
+            个性化清单），否则用户看到的是一个连不上的 MCP，而不是一句"请登录"。
+          */
+          let instructions = 'iSpace 内部应用平台。用这些工具把页面发布到公司域名下。';
+          try {
+            const user = await authenticate(req.headers.authorization);
+            instructions += `\n\n当前身份：${user.displayName}（${user.username}）\n\n`
+              + `## 外部数据：可用的连接器\n\n${await connectorBrief(user.id)}`;
+          } catch {
+            instructions += '\n\n（未通过鉴权，连接器清单不可用；请检查访问令牌。）';
+          }
           return respond({
             protocolVersion: PROTOCOL_VERSION,
             capabilities: { tools: {} },
             serverInfo: { name: 'ispace', version: '0.1.0' },
+            instructions,
           });
+        }
 
         case 'notifications/initialized':
           return reply.status(202).send();
@@ -422,32 +459,17 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
         还有"下一步该怎么写"。
       */
       case 'list-connectors': {
-        const rows = await sql<{ slug: string; name: string; base_url: string;
-                                 auth_kind: string; user_id: string | null }[]>`
-          SELECT slug, name, base_url, auth_kind, user_id
-            FROM ispace.connectors
-           WHERE user_id = ${user.id} OR user_id IS NULL
-           ORDER BY user_id IS NULL, slug
-        `;
-        const mine = rows.length
-          ? rows.map((r) =>
-              `  ${r.slug}${r.user_id === null ? '（全员共享）' : ''}  ${r.name}`
-              + `\n    调用：${d.publicBase}/deploy/api/connect/${r.slug}/{上游路径}`
-              + `\n    上游：${r.base_url}`,
-            ).join('\n')
-          : '  （还没有登记过）';
-        const catalog = CONNECTOR_CATALOG.map((c) =>
-          `  ${c.id}  ${c.name}${c.authKind === 'none' ? '  [免密钥，登记完直接能用]' : `  [需自备 key：${c.apply ?? ''}]`}`
-          + `\n    ${c.what}`,
-        ).join('\n');
+        // 与 initialize.instructions 用同一段文本——两处说法不一致会让模型
+        // 在"我记得的"和"我刚查到的"之间摇摆
+        const brief = await connectorBrief(user.id);
+        const needKey = CONNECTOR_CATALOG
+          .filter((c) => c.authKind !== 'none')
+          .map((c) => `- ${c.id}  ${c.name}\n  ${c.what}\n  申请 key：${c.apply ?? '见官网'}`);
         return [
-          '已登记、现在就能用的连接器：', mine, '',
-          '平台内置目录（都在本平台的服务器上实测过连得通，用 create-connector 登记后即可调用）：',
-          catalog, '',
-          '写页面时的要点：',
-          '1. 调用地址是同源的相对路径，直接 fetch("/deploy/api/connect/{slug}/...") 即可',
-          '2. **不要**在页面代码里出现任何 key——凭据由平台注入，写进代码会被发布链路阻断',
-          '3. 页面要分享给同事的话，用「全员共享」那些；个人连接器只在你自己打开时有效',
+          brief, '',
+          '需要自备 key 的内置目录（用 create-connector 登记后同样只调相对路径）：',
+          ...needKey, '',
+          '页面要分享给同事的话用「全员共享」那些——个人连接器只在你自己打开时有效。',
         ].join('\n');
       }
 
