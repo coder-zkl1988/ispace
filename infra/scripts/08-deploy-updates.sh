@@ -23,7 +23,12 @@ docker build -f apps/updates-service/Dockerfile -t ispace/updates-service:latest
 echo '1234' | sudo -S -p '' mkdir -p /srv/bundles
 echo '1234' | sudo -S -p '' chown 1000:1000 /srv/bundles
 
-set -a; . ~/.ispace/supabase.env; set +a
+set -a
+. ~/.ispace/supabase.env
+# ISPACE_PUBLIC_BASE / ISPACE_DOMAIN 在这里——compose 用 :? 声明为必填，
+# 不 source 就会 "required variable ... is missing a value" 而整个部署失败。
+[ -f ~/.ispace/env ] && . ~/.ispace/env
+set +a
 mkdir -p ~/ispace-deploy
 cp ~/ispace-src/infra/dokploy/updates-service.compose.yml ~/ispace-deploy/
 cd ~/ispace-deploy

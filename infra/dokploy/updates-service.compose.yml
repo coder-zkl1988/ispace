@@ -30,7 +30,12 @@ services:
       - traefik.docker.network=dokploy-network
       - traefik.http.routers.ispace-updates.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`) && PathPrefix(`/updates`)
       - traefik.http.routers.ispace-updates.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
-      - traefik.http.routers.ispace-updates.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      # TLS 由谁终结随环境而变，而这条标签一旦存在，router 就**只**匹配 HTTPS。
+      # 公司网关在前面终结 TLS、只把明文转到本机时，带上它等于全站 503——
+      # 路由还在、后端也 UP，请求却没有任何 router 接得住。所以整条标签做成变量：
+      # Traefik 自己签证书就保持默认；网关终结时置
+      # ISPACE_TLS_LABEL=traefik.enable=true（重复声明同值，无副作用）。
+      - ${ISPACE_TLS_LABEL:-traefik.http.routers.ispace-updates.tls.certresolver=letsencrypt}
       - traefik.http.services.ispace-updates.loadbalancer.server.port=3200
 
 networks:

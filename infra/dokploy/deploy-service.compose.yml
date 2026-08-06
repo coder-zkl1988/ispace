@@ -72,7 +72,9 @@ services:
       - traefik.docker.network=dokploy-network
       - traefik.http.routers.ispace-deploy.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`) && PathPrefix(`/deploy`)
       - traefik.http.routers.ispace-deploy.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
-      - traefik.http.routers.ispace-deploy.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      # 见 updates-service.compose.yml 同一行的说明：这条标签会把 router 锁成
+      # 只匹配 HTTPS，网关在前面终结 TLS 时必须整条去掉，否则全站 503。
+      - ${ISPACE_TLS_LABEL:-traefik.http.routers.ispace-deploy.tls.certresolver=letsencrypt}
       - traefik.http.services.ispace-deploy.loadbalancer.server.port=3100
 
 networks:

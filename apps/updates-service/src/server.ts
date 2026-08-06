@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createDb, dbConfigFromEnv, type Sql } from '@ispace/db';
+import { withCurrentOrigin } from './manifest-origin.js';
 import { isRolledOut } from './rollout.js';
 
 /**
@@ -128,13 +129,13 @@ export async function buildUpdatesServer(opts: { sql?: Sql } = {}): Promise<Fast
       );
       if (!fallback) return reply.status(204).send();
       reply.header('expo-protocol-version', '1');
-      return reply.send(fallback.manifest);
+      return reply.send(withCurrentOrigin(fallback.manifest, PUBLIC_BASE));
     }
 
     reply.header('expo-protocol-version', '1');
     reply.header('expo-sfv-version', '0');
     reply.header('cache-control', 'private, max-age=0');
-    return reply.send(target.manifest);
+    return reply.send(withCurrentOrigin(target.manifest, PUBLIC_BASE));
   });
 
   /**
