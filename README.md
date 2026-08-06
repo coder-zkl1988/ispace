@@ -111,6 +111,7 @@ Claude 调用 MCP → 密钥扫描 → 原子切换软链 → 发布完成
 | 要个后端 | 控制台点一下开一个容器，CPU / 内存限额强制写入 |
 | 给同事用 | 分享给个人，或上架内部「创意市场」 |
 | 手机上看 | Expo 壳，页面可作为 tab 嵌入，支持自托管热更新 |
+| 要调外部接口 | 连接器：凭据平台加密保管并注入，页面代码里不出现密钥 |
 | 别把密钥发出去 | 发布链路 gitleaks 扫描，命中即阻断并留痕 |
 
 ### 几条贯穿始终的判断
@@ -358,7 +359,7 @@ HTTP 与 HTTPS 的差别不只是协议：明文 HTTP 会静默关掉一批浏�
 
 ## 接入方式
 
-**MCP**（19 个工具）——`/deploy/mcp`，复用调用者身份，只能操作本人空间，
+**MCP**（21 个工具）——`/deploy/mcp`，复用调用者身份，只能操作本人空间，
 每次调用进审计日志：
 
 | 类别 | 工具 |
@@ -367,6 +368,7 @@ HTTP 与 HTTPS 的差别不只是协议：明文 HTTP 会静默关掉一批浏�
 | 前端 | `deploy` `rollback` `releases` `delete-app` |
 | 后端 | `create-backend` `redeploy-backend` `delete-backend` |
 | 数据 | `data-connection` `list-tables` |
+| 外部 API | `list-connectors` `create-connector` |
 | 分享 | `set-visibility` `share-with` |
 | 手机端 | `publish-app` `mobile-channel` `mobile-rollback` `set-rollout` |
 | 其他 | `quota` `provision` |
@@ -382,6 +384,51 @@ ai-deploy quota                   # 用量与配额
 ```
 
 **REST**：`/deploy/api/*`，契约由 `packages/contracts` 生成 OpenAPI。
+
+---
+
+## 连接器：页面怎么调外部 API
+
+平台会拦下前端代码里的 `api_key`——这拦得对，AI 生成的代码里带着公司的 key
+发出去就是事故。但只拦不给路，结果是**凡是需要凭据的接口整类做不了**。
+连接器补的就是这一半。
+
+```
+页面                     平台                        上游
+fetch('/deploy/api/  →  查连接器、注入凭据      →   https://restapi.amap.com
+  connect/amap/          校验目标在白名单内            /v3/weather/...
+  v3/weather/...')       记一次审计
+```
+
+页面里没有密钥，也不存在跨域——对页面来说这是同源请求。
+
+**两级归属**。个人连接器谁登记谁用；管理员可以发布**全员共享**的，普通用户
+能调用但看不到凭据本身——公司统一采购的地图 key、内部 ERP 属于这一类。
+注意个人连接器只在**作者自己**打开页面时有效，要分享给同事的页面得用共享的。
+
+**内置目录**。`packages/contracts/src/connectors.ts` 里有一份现成清单，
+覆盖天气、汇率、中国节假日、地图、npm、GitHub。每一条都在部署环境里
+实测过连得通——国内网络下大量境外 API 不可达，抄一份网上的"公开 API 大全"
+进来，用户点开发现一半是死的，比没有目录更糟。换环境后应重新验证。
+
+**怎么用**：控制台「连接器」屏点一下登记，或者直接让 AI 做：
+
+```
+你：做个页面显示北京今天的天气
+AI 调 list-connectors → 看到目录里有 open-meteo（免密钥）
+   调 create-connector → 登记
+   写页面 → fetch('/deploy/api/connect/open-meteo/forecast?...')
+```
+
+**安全边界**（`services/outbound-guard.ts`）。出站代理带着平台的身份，
+不加限制就是一台内网扫描器，所以有四道防线：只允许 http/https；解析主机名并
+拒绝一切落在私有段/回环/链路本地（含云厂商元数据地址 169.254.169.254）的目标；
+每次请求前重新校验一遍（防 DNS 重绑定）；不跟随重定向（否则公网主机 302 到
+127.0.0.1 就绕过了前三道）。要接内网系统得由管理员显式打开
+`ISPACE_CONNECTOR_ALLOW_PRIVATE`，默认关闭。
+
+凭据用 AES-256-GCM 加密入库，**任何接口都不会把它读回来**，包括登记者自己。
+能读回来的保管等于没保管。
 
 ---
 
@@ -499,6 +546,7 @@ Apple Developer 账号）。
 | [SSO 接入](docs/runbooks/sso-setup.md) | OIDC 配置与账号衔接 |
 | [iOS 构建](docs/runbooks/ios-build.md) | 手机壳的 iOS 出包 |
 | [页面包配置](docs/guides/page-bundle-config.md) | `app.json` 声明格式 |
+| [连接器](docs/guides/connectors.md) | 外部 API 接入、目录维护与安全边界 |
 | [明文 HTTP 的代价](apps/mobile-shell/CLEARTEXT.md) | 安全上下文与原生开关 |
 | [Supabase 子路径部署实测](infra/dokploy/supabase.notes.md) | Kong stripPrefix 与 schema 热加载 |
 | [环境变量清单](.env.example) | 全部可配项，按部署机 / 服务端 / 手机壳分组 |

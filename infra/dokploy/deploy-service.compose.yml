@@ -54,6 +54,11 @@ services:
       STEP_API_KEY: ${STEP_API_KEY:-}
       STEP_ASR_URL: ${STEP_ASR_URL:-}
       STEP_ASR_MODEL: ${STEP_ASR_MODEL:-}
+      # 连接器凭据的加密密钥。缺失时需要凭据的连接器登记不了（刻意不回落明文），
+      # 免密钥的照常能用。生成见 .env.example「连接器」一节。
+      ISPACE_CONNECTOR_KEY: ${ISPACE_CONNECTOR_KEY:-}
+      # 允许连接器访问内网。默认关，打开前先读 docs/guides/connectors.md 的安全边界。
+      ISPACE_CONNECTOR_ALLOW_PRIVATE: ${ISPACE_CONNECTOR_ALLOW_PRIVATE:-0}
     volumes:
       # 需要写权限：解压产物、切换软链、清理旧版本
       - /srv/sites:/srv/sites

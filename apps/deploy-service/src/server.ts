@@ -64,6 +64,7 @@ import { registerDataSpaceRoutes } from './routes/dataspace.js';
 import { registerAccountRoutes } from './routes/account.js';
 import { registerOverviewRoutes } from './routes/overview.js';
 import { registerAuthzRoutes } from './routes/authz.js';
+import { registerConnectorRoutes } from './routes/connectors.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -923,6 +924,10 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
 
   // ── 数据空间：表清单与连接信息 ──────────────────────────────────
   registerDataSpaceRoutes(app, { sql, requireAuth, publicBase: PUBLIC_BASE });
+
+  // ── 连接器：外部 API 的凭据保管与出站代理 ──────────────────────
+  // 与上面的数据空间是一对：那条给数据库，这条给外部 API。
+  registerConnectorRoutes(app, { sql, requireAuth, requireAdmin });
   registerOverviewRoutes(app, { sql, requireAuth });
 
   // ── 静态页访问鉴权（Caddy forward_auth 的落点）────────────────────

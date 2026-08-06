@@ -262,8 +262,49 @@ export interface BlockedItem {
   username: string; display_name: string;
 }
 
+
+/** 连接器：页面调外部 API 的登记项。注意**没有** secret 字段——服务端从不回传。 */
+export interface ConnectorRow {
+  id: string;
+  slug: string;
+  name: string;
+  baseUrl: string;
+  authKind: 'none' | 'header' | 'query' | 'bearer';
+  authName: string | null;
+  hasSecret: boolean;
+  catalogId: string | null;
+  shared: boolean;
+  callCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+/** 内置目录条目。每一条都在部署环境实测过连得通，见 contracts/connectors.ts。 */
+export interface CatalogEntry {
+  id: string;
+  name: string;
+  what: string;
+  baseUrl: string;
+  authKind: ConnectorRow['authKind'];
+  authName?: string;
+  apply?: string;
+  example: string;
+  tags: string[];
+}
+
 export const api = {
   dataTables: () => req<{ schema: string; tables: DataTable[] }>('/data/tables'),
+
+  connectors: () => req<{ connectors: ConnectorRow[] }>('/connectors'),
+  connectorCatalog: () =>
+    req<{ catalog: CatalogEntry[]; secretStorageReady: boolean }>('/connectors/catalog'),
+  createConnector: (body: {
+    slug: string; name: string; baseUrl: string;
+    authKind: ConnectorRow['authKind'];
+    authName?: string; secret?: string; catalogId?: string; shared: boolean;
+  }) => req<{ connector: ConnectorRow }>('/connectors', { method: 'POST', body: JSON.stringify(body) }),
+  deleteConnector: (id: string) =>
+    req<{ ok: true }>(`/connectors/${id}`, { method: 'DELETE' }),
   dataConnection: () => req<DataConnection>('/data/connection'),
 
   me: () => req<Me>('/me'),

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import {
+  CONNECTOR_CATALOG,
   ERROR_CODES,
   IspaceError,
   schemaNameFor,
@@ -29,6 +30,8 @@ import type { SessionService } from '@ispace/auth';
 import { backendUrlPath } from '@ispace/orchestrator';
 import type { StorageConfig } from '@ispace/storage';
 import { findUserByAccessToken } from '../routes/tokens.js';
+import { ConnectorKeyMissing, encryptSecret } from '../services/connector-secret.js';
+import { assertOutboundAllowed, OutboundBlocked } from '../services/outbound-guard.js';
 import { createBackend } from '../services/backend.js';
 import { publishMobileBundle } from '../services/mobile-publish.js';
 import { deleteApp } from '../services/app-delete.js';
@@ -409,6 +412,106 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
         return rows.map((r) =>
           `${r.name}  约 ${Number(r.rows).toLocaleString()} 行  行级隔离${r.rls ? '已开' : '**未开**'}`,
         ).join('\n') + '\n\n（行数是统计估算值，不是精确计数）';
+      }
+
+      // ── 外部 API ──────────────────────────────────────────────────
+      /*
+        与 data-connection 同一个道理：不给模型这条路，它面对"要 key 的接口"
+        只会把 key 写进前端代码——然后被发布链路阻断，用户看到的是一次失败的
+        发布和一句他看不懂的 SECRET_DETECTED。返回里因此不只是清单，
+        还有"下一步该怎么写"。
+      */
+      case 'list-connectors': {
+        const rows = await sql<{ slug: string; name: string; base_url: string;
+                                 auth_kind: string; user_id: string | null }[]>`
+          SELECT slug, name, base_url, auth_kind, user_id
+            FROM ispace.connectors
+           WHERE user_id = ${user.id} OR user_id IS NULL
+           ORDER BY user_id IS NULL, slug
+        `;
+        const mine = rows.length
+          ? rows.map((r) =>
+              `  ${r.slug}${r.user_id === null ? '（全员共享）' : ''}  ${r.name}`
+              + `\n    调用：${d.publicBase}/deploy/api/connect/${r.slug}/{上游路径}`
+              + `\n    上游：${r.base_url}`,
+            ).join('\n')
+          : '  （还没有登记过）';
+        const catalog = CONNECTOR_CATALOG.map((c) =>
+          `  ${c.id}  ${c.name}${c.authKind === 'none' ? '  [免密钥，登记完直接能用]' : `  [需自备 key：${c.apply ?? ''}]`}`
+          + `\n    ${c.what}`,
+        ).join('\n');
+        return [
+          '已登记、现在就能用的连接器：', mine, '',
+          '平台内置目录（都在本平台的服务器上实测过连得通，用 create-connector 登记后即可调用）：',
+          catalog, '',
+          '写页面时的要点：',
+          '1. 调用地址是同源的相对路径，直接 fetch("/deploy/api/connect/{slug}/...") 即可',
+          '2. **不要**在页面代码里出现任何 key——凭据由平台注入，写进代码会被发布链路阻断',
+          '3. 页面要分享给同事的话，用「全员共享」那些；个人连接器只在你自己打开时有效',
+        ].join('\n');
+      }
+
+      case 'create-connector': {
+        const input = args as {
+          slug: string; name: string; baseUrl: string;
+          authKind?: 'none' | 'header' | 'query' | 'bearer';
+          authName?: string; secret?: string; catalogId?: string;
+        };
+        const authKind = input.authKind ?? 'none';
+        try {
+          await assertOutboundAllowed(input.baseUrl, {
+            allowPrivate: process.env.ISPACE_CONNECTOR_ALLOW_PRIVATE === '1',
+          });
+        } catch (e) {
+          if (e instanceof OutboundBlocked) {
+            throw new IspaceError(ERROR_CODES.INVALID_INPUT, e.message);
+          }
+          throw e;
+        }
+        let secretEnc: Buffer | null = null;
+        if (input.secret) {
+          try { secretEnc = encryptSecret(input.secret); } catch (e) {
+            if (e instanceof ConnectorKeyMissing) {
+              throw new IspaceError(ERROR_CODES.NOT_IMPLEMENTED, e.message);
+            }
+            throw e;
+          }
+        }
+        const dup = await sql<{ id: string }[]>`
+          SELECT id FROM ispace.connectors
+           WHERE slug = ${input.slug} AND (user_id = ${user.id} OR user_id IS NULL)
+        `;
+        if (dup.length) {
+          throw new IspaceError(
+            ERROR_CODES.ALREADY_EXISTS,
+            `已经有一个叫「${input.slug}」的连接器了（可能是全员共享的）。`
+            + '先用 list-connectors 看一眼，能直接用就别新建。',
+          );
+        }
+        const rows = await sql<{ id: string }[]>`
+          INSERT INTO ispace.connectors
+            (user_id, slug, name, base_url, auth_kind, auth_name, secret_enc, catalog_id, created_by)
+          VALUES (${user.id}, ${input.slug}, ${input.name}, ${input.baseUrl},
+                  ${authKind}, ${input.authName ?? null}, ${secretEnc},
+                  ${input.catalogId ?? null}, ${user.id})
+          RETURNING id
+        `;
+        await writeAudit(sql, {
+          actorId: user.id, action: 'connector.create', targetType: 'connector',
+          targetId: rows[0]!.id, source: 'mcp', result: 'success',
+          metadata: { slug: input.slug, baseUrl: input.baseUrl },
+          ip: clientIp,
+        });
+        return [
+          `连接器「${input.name}」登记好了。`,
+          '',
+          `页面里这样调：fetch('/deploy/api/connect/${input.slug}/{上游路径}')`,
+          `实际会打到：${input.baseUrl}/{上游路径}`,
+          input.secret ? '凭据已加密保管，之后任何接口都读不回来，页面代码里也不要写。' : '',
+          '',
+          '注意：这是个人连接器，只在你自己打开页面时有效。要给同事用的页面，',
+          '请管理员在控制台发布一个全员共享的连接器。',
+        ].filter(Boolean).join('\n');
       }
 
       // ── 前端 ──────────────────────────────────────────────────────

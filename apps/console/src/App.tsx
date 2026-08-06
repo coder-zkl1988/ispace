@@ -8,6 +8,7 @@ import { api, type Me } from './api';
 import { SpaceOverview } from './screens/SpaceOverview';
 import { MyPages } from './screens/MyPages';
 import { Backends } from './screens/Backends';
+import { Connectors } from './screens/Connectors';
 import { DataSpace } from './screens/DataSpace';
 import { MobileChannel } from './screens/MobileChannel';
 import { QuotaScreen } from './screens/Quota';
@@ -34,7 +35,7 @@ import { AdminInspection } from './screens/AdminInspection';
 
 /** 每屏配一个图标。图标名与 path 取自设计稿实测，见 packages/ui/src/icons.tsx。 */
 type EmployeeScreen =
-  | 'overview' | 'pages' | 'backends' | 'data'
+  | 'overview' | 'pages' | 'backends' | 'data' | 'connectors'
   | 'mobile' | 'quota' | 'audit' | 'guide';
 type AdminScreen =
   | 'a-overview' | 'a-users' | 'a-tokens'
@@ -49,6 +50,9 @@ const EMPLOYEE_NAV: { group: string; items: { key: EmployeeScreen; label: string
       { key: 'pages', label: '我的页面', icon: 'pages' },
       { key: 'backends', label: '后端应用', icon: 'backend' },
       { key: 'data', label: '数据空间', icon: 'data' },
+      // 与数据空间挨着是刻意的：一个管"数据存哪"，一个管"数据从哪来"，
+      // 用户脑子里它们是同一类问题。
+      { key: 'connectors', label: '连接器', icon: 'zap' },
     ],
   },
   { group: '手机应用', items: [{ key: 'mobile', label: '更新通道', icon: 'mobile' }] },
@@ -160,6 +164,7 @@ function Screens({ screen, me }: { screen: Screen; me: Me }) {
     case 'pages':        return <MyPages me={me} />;
     case 'backends':     return <Backends me={me} />;
     case 'data':         return <DataSpace me={me} />;
+    case 'connectors':   return <Connectors me={me} />;
     case 'mobile':       return <MobileChannel />;
     case 'quota':        return <QuotaScreen />;
     case 'audit':        return <AuditScreen />;

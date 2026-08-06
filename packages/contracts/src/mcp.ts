@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { appSlugSchema, usernameSchema } from './reserved.js';
+import { authKindSchema, connectorSlugSchema } from './connectors.js';
 
 /**
  * MCP 工具契约。7 个工具取自设计稿「接入指引」屏的实际列表。
@@ -35,6 +36,13 @@ export const MCP_TOOL_NAMES = [
   // 只能让用户自己去控制台复制连接信息——那一步就把非技术用户挡住了。
   'data-connection',
   'list-tables',
+
+  // ── 外部 API ──
+  // 与 data-connection 是一对：那条给数据库，这条给外部 API。
+  // 没有它，模型面对"要 key 的接口"只能把 key 写进前端——而那会被发布链路
+  // 阻断，于是整类需求做不了。
+  'list-connectors',
+  'create-connector',
 
   // ── 分享 ──
   'set-visibility',
@@ -178,6 +186,30 @@ export const mcpShareWithInput = z.object({
   toUsername: usernameSchema.describe('同事的空间标识（地址里那一段，如 lixiao）'),
 });
 
+/**
+ * 登记连接器。字段与 REST 的 createConnectorSchema 一致，但描述是写给**模型**看的
+ * ——模型看不到控制台的表单说明，全靠这里把"该填什么"讲清楚。
+ */
+export const mcpCreateConnectorInput = z.object({
+  slug: connectorSlugSchema.describe('页面里用的短名，调用地址是 /deploy/api/connect/{slug}/...'),
+  name: z.string().min(1).max(60).describe('给人看的名字，如「高德地图」'),
+  baseUrl: z.string().url().describe(
+    '上游 API 的根地址，**同时是出站白名单**：代理只允许访问它的前缀之下。'
+    + '填得越具体越安全，如 https://restapi.amap.com/v3 而不是 https://restapi.amap.com',
+  ),
+  authKind: authKindSchema.default('none').describe(
+    'none=不要凭据；query=拼在查询串里（高德、和风都是这种）；'
+    + 'header=放在自定义请求头；bearer=标准 Authorization: Bearer',
+  ),
+  authName: z.string().min(1).max(64).optional()
+    .describe('query 或 header 方式下的参数名，如 key 或 X-API-Key'),
+  secret: z.string().min(1).max(4096).optional().describe(
+    '凭据明文。落库即加密，**任何接口都不会再把它读回来**，所以别指望之后能查看。'
+    + '让用户自己提供，不要编造。',
+  ),
+  catalogId: z.string().max(64).optional().describe('若来自 list-connectors 返回的目录，填那一条的 id'),
+});
+
 export const MCP_TOOL_INPUTS = {
   'list-apps': empty,
   'list-backends': empty,
@@ -194,6 +226,9 @@ export const MCP_TOOL_INPUTS = {
 
   'data-connection': empty,
   'list-tables': empty,
+
+  'list-connectors': empty,
+  'create-connector': mcpCreateConnectorInput,
 
   'set-visibility': mcpSetVisibilityInput,
   'share-with': mcpShareWithInput,
@@ -246,6 +281,17 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   'list-tables':
     '列出当前用户数据空间里已有的表、行数与行级隔离是否开启。'
     + '建表前先看，避免重名；也用来回答"我的数据存了多少"。',
+
+  'list-connectors':
+    '列出当前用户能用的外部 API 连接器，以及平台内置的可选目录。'
+    + '**页面要调用任何外部接口之前先调它**：能直接用现成的就别新建；'
+    + '也用来拿到调用地址，形如 /deploy/api/connect/{slug}/{上游路径}。',
+  'create-connector':
+    '登记一个外部 API 连接器。凭据交给平台加密保管，页面此后调 '
+    + '/deploy/api/connect/{slug}/... 即可，**代码里不出现任何密钥**。'
+    + '这是需要 key 的接口的唯一正确接法——把 key 写进前端代码会被发布链路阻断。'
+    + '顺带也解决跨域：对页面来说这是同源请求。'
+    + 'baseUrl 是出站白名单，代理只允许访问它的前缀之下。',
 
   'set-visibility':
     '设置页面的可见范围。做完一个页面想给同事用时调它——'
