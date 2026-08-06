@@ -334,7 +334,8 @@ curl -sI "$ISPACE_BASE_URL/console"              # 控制台
 | 改了后端代码 | `06-deploy-service.sh` |
 | 备份 / 恢复演练 | `09-backup.sh` / `10-restore-drill.sh` |
 | 补一条设密码链接 | `13-issue-reset-link.sh <email>` |
-| 发安卓安装包 | `14-publish-apk.sh` |
+| 改了更新服务 | `08-deploy-updates.sh` |
+| 发安卓安装包 | `14-publish-apk.sh`（先 gradle 出包，见「手机端」） |
 
 拓扑、目录、端口与踩过的坑见 [server-state.md](docs/runbooks/server-state.md)。
 
@@ -384,6 +385,98 @@ ai-deploy quota                   # 用量与配额
 
 ---
 
+## 手机端
+
+一个 Expo 壳，装一次，之后所有页面都热更新到端上。
+
+### 壳分两层
+
+```
+原生壳（APK / IPA）      原生模块、expo-updates、系统权限。换它要重装
+     ↑ 装一次
+JS 壳运行时（apps/shell-js + mobile-shell/src/shell）
+     ↑ 构建期强制合成进每一个页面包
+用户页面
+```
+
+expo-updates 是**整包替换**：加载页面包时换掉的是整个 JS 层。所以底部导航、
+设置、更新卡片这些平台必须替所有人兜住的东西，不能指望用户包自带——由
+`tools/compose-bundle.mjs` 在 `expo export` 之前注入，用户源码里根本不存在它，
+删不掉也改不了。
+
+同一条流水线还负责：拒绝新增原生依赖（会让 runtimeVersion 漂移，更新装不上）、
+校验页面包的 `app.json`、把平台地址写进产物。
+
+### 页面有两种
+
+- **页面包（RN）**：跑在壳里，原生渲染。经 `publish-app` 发到个人通道
+- **网页（H5）**：PC 上做的页面直接在壳内 WebView 打开。壳注入的网页 chrome
+  会自检并隐藏自己，顶部安全区由壳补，看起来接近原生
+
+底栏固定四格——首页 / 我的作品 / 创意集市 / 我。首页由用户自己指定默认页面。
+这四格是壳的骨架不是内容，不做成可配置：能配置的东西迟早会被配置成没人认得的样子。
+
+### 两条独立的更新路径
+
+| | 页面包 | 壳 |
+|---|---|---|
+| 大小 | 几 MB | 近百 MB |
+| 通道 | 自托管 expo-updates（`updates-service`） | `/dist/version.json` + APK |
+| 提示 | 底栏通栏横幅，点一下就地重载 | 「我」那一格挂个点，不打扰 |
+| 安装 | 无感 | App 内下载 + 唤起系统安装器（最后一下确认绕不过） |
+| 回滚 | 通道指针切回去，秒级 | 重装 |
+
+灰度按设备 ID 分桶；未放量的设备收到 204 而不是旧 manifest——返回旧的会让壳
+以为"有更新"而反复下载同一个包。
+
+### 发一版
+
+```bash
+# 1. 合成：注入 JS 壳运行时，校验依赖与 app.json
+node tools/compose-bundle.mjs --user <用户名> --src <页面工程> --out <合成目录>
+
+# 2. 导出
+cd <合成目录> && EXPO_PUBLIC_ISPACE_BASE_URL=$ISPACE_BASE_URL \
+  npx expo export --platform android --clear
+
+# 3. 发布（或让 AI 调 MCP 的 publish-app）
+curl -X POST "$ISPACE_BASE_URL/deploy/api/mobile/publish" \
+  -H "authorization: Bearer $ISPACE_API_TOKEN" \
+  -F runtimeVersion=54.0.0 -F rolloutPercent=100 -F file=@dist.zip
+```
+
+改了环境变量一定要带 `--clear`：Metro 会缓存已内联的字面量，不清缓存就发出
+一个指着旧地址的包。
+
+### 出壳与分发
+
+```bash
+export ISPACE_APP_ID=com.yourcompany.ispace        # 反向域名，发出去过就别再改
+export EXPO_PUBLIC_ISPACE_BASE_URL=$ISPACE_BASE_URL
+
+cd apps/mobile-shell
+npx expo prebuild --platform android --clean       # 改过 app.config.js 就要重来一遍
+cd android && ./gradlew assembleRelease && cd ../../..
+
+./infra/scripts/14-publish-apk.sh                  # 上架到 /dist，PC 端出二维码
+```
+
+`android/` 与 `ios/` 是 prebuild 生成的，手改会被下一次 prebuild 抹掉——
+要改原生配置就写 config plugin（见 `apps/mobile-shell/plugins/`）。
+下载路径 `/dist/*` 免登录，这是刻意的：同事装 App 那一刻手上还没有会话。
+
+`ISPACE_APP_ID` 同时是**更新与覆盖安装的身份**：改了它，系统就认为这是另一个
+App，既有安装收不到更新，只能重装。仓库里的默认值是 `com.example.ispace`。
+
+⚠️ `ISPACE_PUBLIC_BASE`（服务端）与 `EXPO_PUBLIC_ISPACE_BASE_URL`（壳构建期）
+**必须同 scheme**。不一致时更新会卡在「正在下载」且没有任何报错，原因和排查
+路径见 [CLEARTEXT.md](apps/mobile-shell/CLEARTEXT.md)。
+
+iOS 出包见 [docs/runbooks/ios-build.md](docs/runbooks/ios-build.md)（需要
+Apple Developer 账号）。
+
+---
+
 ## 登录
 
 默认**邮箱 + 密码**，开箱可用。公司 SSO（OIDC）是可选的第二条路，
@@ -408,6 +501,7 @@ ai-deploy quota                   # 用量与配额
 | [页面包配置](docs/guides/page-bundle-config.md) | `app.json` 声明格式 |
 | [明文 HTTP 的代价](apps/mobile-shell/CLEARTEXT.md) | 安全上下文与原生开关 |
 | [Supabase 子路径部署实测](infra/dokploy/supabase.notes.md) | Kong stripPrefix 与 schema 热加载 |
+| [环境变量清单](.env.example) | 全部可配项，按部署机 / 服务端 / 手机壳分组 |
 
 ---
 

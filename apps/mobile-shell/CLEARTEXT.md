@@ -18,6 +18,30 @@ Android 9 (API 28) 起默认禁止应用发起明文 HTTP 请求，iOS 的 ATS �
 实测发现的过程：登录点下去浏览器根本不开，因为第一个 fetch
 （`/auth/native/pair`）就失败了。
 
+## 最阴的一种：壳是 https，服务端却往 manifest 里写 http
+
+上面说的是「整个实例是 http」。还有一种只坏一半的形态，实际发生过，
+从现象到根因花了很久：
+
+壳用 `https://` 构建（于是 `usesCleartextTraffic=false`，正确），但服务端的
+`ISPACE_PUBLIC_BASE` 是 `http://`。登录、页面市场、H5 全都正常——那些地址由
+壳自己拼，走的是 `EXPO_PUBLIC_ISPACE_BASE_URL`。**只有更新包的资源地址是
+服务端给的**：manifest 里每个 asset 的 URL 在发布那一刻按 `ISPACE_PUBLIC_BASE`
+写死。于是壳拿到一串 `http://` 地址，安卓在平台层逐个掐掉。
+
+表现是点了更新之后**永远停在「正在下载」**：`fetchUpdateAsync` 既不返回也不
+抛错，JS 侧的 try/catch 和超时都拦不住——请求根本没进到 JS 能观察到的层面。
+服务端日志的样子是决定性的：`/updates/manifest` 有 200，`/updates/assets/*`
+一条都没有。
+
+三条防线：
+
+1. `ISPACE_PUBLIC_BASE` 的 scheme 必须与 `EXPO_PUBLIC_ISPACE_BASE_URL` 一致
+2. `updates-service` 在**下发时**按当前 `ISPACE_PUBLIC_BASE` 归一化 manifest
+   里的资源地址（`src/manifest-origin.ts`），发布时刻的快照不再有约束力
+3. 排查时先看有没有 `/updates/assets/*` 请求，那一眼就能分清是「没下发」
+   还是「下发了但取不到」
+
 ## 为什么不无条件开着
 
 开着它等于放弃传输层加密。内网 HTTP 实例上这是既成事实（本来就没有证书），

@@ -23,7 +23,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HOST="${TARGET_HOST:?需要设置 TARGET_HOST，形如 deploy@ispace.example.com}"
 KEY="${DEPLOY_KEY:-$HOME/.ssh/ispace_deploy}"
 BASE_URL="${ISPACE_BASE_URL:?需要设置 ISPACE_BASE_URL，形如 https://ispace.example.com}"
-SUDO_PW="${REMOTE_SUDO_PW:-1234}"
+SUDO_PW="${REMOTE_SUDO_PW:?需要设置 REMOTE_SUDO_PW 环境变量}"
 
 APK="${ISPACE_APK:-$REPO_ROOT/apps/mobile-shell/android/app/build/outputs/apk/release/app-release.apk}"
 REMOTE_DIR=/srv/dist

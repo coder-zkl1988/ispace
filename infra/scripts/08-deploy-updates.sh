@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HOST="${TARGET_HOST:?需要设置 TARGET_HOST，形如 deploy@ispace.example.com}"
+# 目标机 sudo 口令。只经环境变量传入，不落盘、不进仓库。
+: "${REMOTE_SUDO_PW:?需要设置 REMOTE_SUDO_PW 环境变量}"
 KEY="${DEPLOY_KEY:-$HOME/.ssh/ispace_deploy}"
 
 echo "== 1. 同步源码 =="
@@ -15,13 +17,14 @@ rsync -az --delete \
   "$REPO_ROOT/" "$HOST:~/ispace-src/"
 
 echo "== 2. 构建并启动 =="
-"$SCRIPT_DIR/remote.sh" 'bash -s' <<'REMOTE'
+"$SCRIPT_DIR/remote.sh" "REMOTE_SUDO_PW='$REMOTE_SUDO_PW' bash -s" <<'REMOTE'
 set -eu
 cd ~/ispace-src
 docker build -f apps/updates-service/Dockerfile -t ispace/updates-service:latest . 2>&1 | tail -4
 
-echo '1234' | sudo -S -p '' mkdir -p /srv/bundles
-echo '1234' | sudo -S -p '' chown 1000:1000 /srv/bundles
+sudo_run() { echo "$REMOTE_SUDO_PW" | sudo -S -p "" "$@"; }
+sudo_run mkdir -p /srv/bundles
+sudo_run chown 1000:1000 /srv/bundles
 
 set -a
 . ~/.ispace/supabase.env

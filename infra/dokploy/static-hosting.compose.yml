@@ -32,7 +32,9 @@ services:
       - traefik.docker.network=dokploy-network
       - traefik.http.routers.ispace-static.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`)
       - traefik.http.routers.ispace-static.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
-      - traefik.http.routers.ispace-static.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      # 见 .env.example「网关与 TLS」：TLS 由上游网关终结时，整条标签必须消失，
+      # 留着 certresolver 会让 router 只匹配 HTTPS，web 入口上无人应答。
+      - ${ISPACE_TLS_LABEL:-traefik.http.routers.ispace-static.tls.certresolver=letsencrypt}
       - traefik.http.services.ispace-static.loadbalancer.server.port=8080
 
   # portal：统一入口 SPA。

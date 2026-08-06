@@ -30,7 +30,9 @@ services:
       - traefik.docker.network=dokploy-network
       - traefik.http.routers.ispace-supabase.rule=Host(`${ISPACE_DOMAIN:?平台域名，如 ispace.example.com}`) && PathPrefix(`/supabase`)
       - traefik.http.routers.ispace-supabase.entrypoints=${ISPACE_TRAEFIK_ENTRYPOINT:-websecure}
-      - traefik.http.routers.ispace-supabase.tls.certresolver=${ISPACE_CERT_RESOLVER:-letsencrypt}
+      # 见 .env.example「网关与 TLS」：TLS 由上游网关终结时，整条标签必须消失，
+      # 留着 certresolver 会让 router 只匹配 HTTPS，web 入口上无人应答。
+      - ${ISPACE_TLS_LABEL:-traefik.http.routers.ispace-supabase.tls.certresolver=letsencrypt}
       - traefik.http.routers.ispace-supabase.middlewares=ispace-supabase-strip
       - traefik.http.middlewares.ispace-supabase-strip.stripprefix.prefixes=/supabase
       - traefik.http.services.ispace-supabase.loadbalancer.server.port=8000

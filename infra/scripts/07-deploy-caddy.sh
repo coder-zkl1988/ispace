@@ -30,7 +30,7 @@ fi
 echo "   Valid configuration"
 
 echo "== 3. 落地并重启 =="
-"$SCRIPT_DIR/remote.sh" "echo '${REMOTE_SUDO_PW:-1234}' | sudo -S -p '' cp /tmp/Caddyfile.staged '$DEST'
+"$SCRIPT_DIR/remote.sh" "echo '${REMOTE_SUDO_PW:?需要设置 REMOTE_SUDO_PW 环境变量}' | sudo -S -p '' cp /tmp/Caddyfile.staged '$DEST'
 cd ~/ispace-deploy && docker compose -f static-hosting.compose.yml -p ispace restart $SVC 2>&1 | tail -2"
 
 echo "== 4. 冒烟 =="
