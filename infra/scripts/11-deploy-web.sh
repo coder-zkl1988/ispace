@@ -53,10 +53,13 @@ done
 
 # 控制台是 SPA，index.html 必须真的引到本次构建的 JS，
 # 而不是 rsync 半途失败后留下的旧壳。
+# 打印**实际请求的那个路径**而不是 grep 出来的片段：控制台资源在
+# /console/assets/ 下，而 /assets/ 会被 portal 的 SPA 兜底成 200+HTML。
+# 两者只差一个前缀，日志里印错一个就足以让人拿着 200 去查一个不存在的问题。
 asset=$(curl -s --max-time 20 "$BASE_URL/console/" | grep -oE '/assets/[^"]+\.js' | head -1)
 if [ -n "$asset" ]; then
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE_URL/console$asset" || echo 000)
-  printf '   %-22s %s\n' "$asset" "$code"
+  printf '   %-22s %s\n' "/console$asset" "$code"
   [ "$code" = "200" ] || fail=1
 else
   echo "   控制台 index.html 里找不到 JS 引用" >&2
