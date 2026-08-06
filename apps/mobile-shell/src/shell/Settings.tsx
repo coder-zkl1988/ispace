@@ -85,23 +85,20 @@ export function Settings(p: SettingsProps) {
         */}
 
         {/*
-          壳自身的新版本。页面包更新是静默的，壳不行——近百 MB、必须用户
-          确认安装，所以做成一张能看清"要下多大、更到哪一版"的卡片，
-          而不是一个悄悄出现的角标。
+          壳自身的新版本。做成一行卡片而不是一段说明：用户在这儿只需要
+          决定"装不装"，构建号、装完丢不丢东西这些是他不问就不必知道的。
+          版式与启动器里那条「创意市场」一致——同一套语言，不另起炉灶。
         */}
         {shellUp && (
           <Pressable style={styles.shellCard} onPress={() => void Linking.openURL(shellUp.url)}>
-            {/*
-              标题不写 versionName：它长期是 1.0.0，写出来就成了
-              「有新版本 1.0.0」而用户当前装的也是 1.0.0，看着像出错。
-              真正在变的是构建号，把两个都摆出来才说得清新在哪。
-            */}
-            <Text style={styles.shellTitle}>App 有新版本可以装</Text>
-            <Text style={styles.shellBody}>
-              你现在是构建 {shellUp.installed}，最新是构建 {shellUp.versionCode}。
-              点这里下载安装（{(shellUp.sizeBytes / 1048576).toFixed(0)} MB），
-              装完你做的页面和设置都还在。
-            </Text>
+            <View style={styles.shellIcon}><Text style={styles.shellIconText}>↓</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.shellTitle}>有新版本 App</Text>
+              <Text style={styles.shellBody}>
+                {(shellUp.sizeBytes / 1048576).toFixed(0)} MB · 构建 {shellUp.versionCode}
+              </Text>
+            </View>
+            <View style={styles.shellBtn}><Text style={styles.shellBtnText}>更新</Text></View>
           </Pressable>
         )}
 
@@ -245,11 +242,22 @@ const C = {
 
 const styles = StyleSheet.create({
   shellCard: {
-    backgroundColor: '#fff7ed', borderRadius: 14, padding: 14, marginBottom: 16,
-    borderWidth: 1, borderColor: '#fed7aa', gap: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 11,
+    backgroundColor: '#fff', borderRadius: 14, padding: 12, marginBottom: 16,
+    borderWidth: 1, borderColor: 'rgba(0,0,0,.07)',
   },
-  shellTitle: { fontSize: 15, fontWeight: '700', color: '#9a3412' },
-  shellBody: { fontSize: 12.5, color: '#9a3412', lineHeight: 19, opacity: 0.85 },
+  shellIcon: {
+    width: 34, height: 34, borderRadius: 11, backgroundColor: '#fb923c',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  shellIconText: { color: '#fff', fontSize: 17, fontWeight: '700', marginTop: -1 },
+  shellTitle: { fontSize: 14.5, fontWeight: '600', color: '#001217' },
+  shellBody: { fontSize: 11.5, color: '#909599', marginTop: 2 },
+  shellBtn: {
+    backgroundColor: '#001217', borderRadius: 9,
+    paddingHorizontal: 14, paddingVertical: 7,
+  },
+  shellBtnText: { color: '#fff', fontSize: 12.5, fontWeight: '600' },
   root: { flex: 1, backgroundColor: C.canvas },
   head: {
     flexDirection: 'row', alignItems: 'center',
