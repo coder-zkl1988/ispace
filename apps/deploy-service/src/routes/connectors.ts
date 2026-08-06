@@ -205,7 +205,24 @@ export function registerConnectorRoutes(
        ORDER BY user_id IS NULL
        LIMIT 1
     `;
-    const c = rows[0];
+    /*
+      查不到登记记录时，回落到内置目录里**免密钥**的那些。
+
+      为什么必须有这条回落：免密钥的接口本来就不需要任何凭据，"登记"对它们
+      只是一次仪式。而 agent 写页面时没法替用户去点那一下——它只能在提示里
+      写"请先去控制台登记一个天气连接器"，用户的一句"做个天气页面"就此变成
+      一趟往返。既然平台已经实测过这些接口连得通，就该让它们开箱可用。
+
+      只回落 authKind === 'none'：需要 key 的必须登记，因为 key 得有人填。
+    */
+    const builtin = CONNECTOR_CATALOG.find((x) => x.id === slug && x.authKind === 'none');
+    const c: Pick<Row, 'id' | 'base_url' | 'auth_kind' | 'auth_name' | 'secret_enc'> | undefined =
+      rows[0] ?? (builtin
+        ? {
+            id: builtin.id, base_url: builtin.baseUrl,
+            auth_kind: 'none' as AuthKind, auth_name: null, secret_enc: null,
+          }
+        : undefined);
     if (!c) {
       throw new IspaceError(
         ERROR_CODES.NOT_FOUND,
@@ -214,6 +231,8 @@ export function registerConnectorRoutes(
         + '个人连接器只在作者自己打开时有效。请页面作者改用管理员发布的共享连接器。',
       );
     }
+    // 回落进来的没有数据库行，用量统计里也就没有它。审计仍然照记
+    const isBuiltin = !rows[0];
 
     const qs = req.raw.url?.includes('?') ? `?${req.raw.url.split('?').slice(1).join('?')}` : '';
     let target: URL;
@@ -225,7 +244,7 @@ export function registerConnectorRoutes(
       if (e instanceof OutboundBlocked) {
         await writeAudit(sql, {
           actorId: me.id, action: 'connector.call', targetType: 'connector',
-          targetId: c.id, source: 'console', result: 'blocked',
+          ...(isBuiltin ? {} : { targetId: c.id }), source: 'console', result: 'blocked',
           metadata: { slug, reason: e.message }, ip: req.ip,
         });
         throw new IspaceError(ERROR_CODES.INVALID_INPUT, e.message);
@@ -261,7 +280,8 @@ export function registerConnectorRoutes(
       const blocked = e instanceof OutboundBlocked;
       await writeAudit(sql, {
         actorId: me.id, action: 'connector.call', targetType: 'connector',
-        targetId: c.id, source: 'console', result: blocked ? 'blocked' : 'failed',
+        ...(isBuiltin ? {} : { targetId: c.id }),
+        source: 'console', result: blocked ? 'blocked' : 'failed',
         metadata: { slug, host: target.host, ...(blocked ? { reason: e.message } : {}) },
         ip: req.ip,
       });
@@ -273,13 +293,16 @@ export function registerConnectorRoutes(
       );
     }
 
-    // 计数不阻塞返回：统计写不进去不该让用户的请求跟着失败
-    void sql`
-      UPDATE ispace.connectors
-         SET call_count = call_count + 1, last_used_at = now()
-       WHERE id = ${c.id}
-    `.catch(() => { /* 用量统计而已，丢一次无所谓 */ });
-
+    // 计数不阻塞返回：统计写不进去不该让用户的请求跟着失败。
+    // 回落到内置目录的没有数据库行，跳过——c.id 那时是目录 id 不是 uuid，
+    // 拿它去 WHERE id = 会直接抛类型错误。
+    if (!isBuiltin) {
+      void sql`
+        UPDATE ispace.connectors
+           SET call_count = call_count + 1, last_used_at = now()
+         WHERE id = ${c.id}
+      `.catch(() => { /* 用量统计而已，丢一次无所谓 */ });
+    }
     for (const [k, v] of Object.entries(upstream.headers)) {
       if (v !== undefined && !DROP_RESPONSE_HEADERS.has(k.toLowerCase())) reply.header(k, v);
     }

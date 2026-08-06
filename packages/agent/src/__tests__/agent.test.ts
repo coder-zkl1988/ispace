@@ -173,7 +173,7 @@ describe('buildSystemPrompt 里的可用连接器', () => {
     slug: 'open-meteo', name: '天气预报', what: '任意经纬度的实况与未来天气',
     example: '/forecast?latitude=39.9&longitude=116.4&current=temperature_2m',
     returns: 'data.current.temperature_2m → 摄氏度数字',
-    shared: false,
+    scope: 'personal',
   };
 
   it('把调用地址拼成同源相对路径，模型照抄即可', () => {
@@ -185,9 +185,16 @@ describe('buildSystemPrompt 里的可用连接器', () => {
     expect(buildSystemPrompt([one])).toContain('data.current.temperature_2m');
   });
 
-  it('标出共享连接器，个人的不标', () => {
-    expect(buildSystemPrompt([{ ...one, shared: true }])).toContain('（全员共享）');
-    expect(buildSystemPrompt([one])).not.toContain('（全员共享）');
+  it('三态各自标出来——个人与另外两者的区别有实际后果', () => {
+    expect(buildSystemPrompt([{ ...one, scope: 'shared' }])).toContain('（全员共享）');
+    expect(buildSystemPrompt([{ ...one, scope: 'builtin' }])).toContain('（平台内置）');
+    expect(buildSystemPrompt([one])).toContain('（仅你自己）');
+  });
+
+  it('有个人连接器才警告"分享给同事会空白"，没有就不啰嗦', () => {
+    expect(buildSystemPrompt([one])).toContain('只在你自己打开页面时有效');
+    expect(buildSystemPrompt([{ ...one, scope: 'builtin' }]))
+      .not.toContain('只在你自己打开');
   });
 
   it('一条都没有时，明确禁止自己编域名，而不是留白', () => {

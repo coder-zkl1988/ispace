@@ -40,10 +40,25 @@ export function Connectors({ me }: { me: Me }) {
   };
   useEffect(load, []);
 
-  const pick = (c: CatalogEntry) => {
+  const pick = (c: CatalogEntry, shared = false) => {
     setForm({
       slug: c.id, name: c.name, baseUrl: c.baseUrl, authKind: c.authKind,
-      authName: c.authName ?? '', secret: '', catalogId: c.id, shared: false,
+      authName: c.authName ?? '', secret: '', catalogId: c.id, shared,
+    });
+    setOpen(true);
+  };
+
+  /**
+   * 空表单 + 是否共享。
+   *
+   * 管理员配置全员连接器此前只有一条路：点「手动登记一个」，再在表单底部
+   * 找到一个复选框。那个位置没人找得到——"在哪里配公共连接器"会变成一个
+   * 需要问人的问题，而这个平台的目的正是让人不必问人。
+   */
+  const blank = (shared: boolean) => {
+    setForm({
+      slug: '', name: '', baseUrl: '', authKind: 'none',
+      authName: '', secret: '', catalogId: '', shared,
     });
     setOpen(true);
   };
@@ -108,13 +123,23 @@ export function Connectors({ me }: { me: Me }) {
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <b>已登记</b>
-          <Button onClick={() => setOpen((v) => !v)}>{open ? '收起' : '手动登记一个'}</Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {me.user.role === 'admin' && (
+              <Button onClick={() => (open ? setOpen(false) : blank(true))}>
+                发布全员共享的
+              </Button>
+            )}
+            <Button onClick={() => (open ? setOpen(false) : blank(false))}>
+              {open ? '收起' : '手动登记一个'}
+            </Button>
+          </div>
         </div>
 
         {rows === null && <div style={{ opacity: .6 }}>加载中…</div>}
         {rows?.length === 0 && (
           <div style={{ opacity: .7, lineHeight: 1.8 }}>
-            还没有。从下面的目录里挑一个，或者手动登记你们内部系统的接口。
+            还没有。标「免密钥」的目录条目不用登记就能直接调，这里只放需要凭据的那些
+            ——比如公司内部系统，或者你自己申请的 key。
           </div>
         )}
 
@@ -246,11 +271,14 @@ export function Connectors({ me }: { me: Me }) {
       )}
 
       {/* ── 目录 ───────────────────────────────────────────────── */}
+      <div style={{ marginTop: 16 }} />
       <Card>
         <b>可以直接用的</b>
         <p style={{ margin: '6px 0 14px', fontSize: 12.5, opacity: .7, lineHeight: 1.7 }}>
           下面每一条都在这台服务器上实测过连得通——国内环境下很多境外接口是不可达的，
-          所以这份清单是实测结果而不是抄来的。
+          所以这份清单是实测结果而不是抄来的。<br />
+          标「免密钥」的<b>不需要任何操作</b>，页面里直接调下面那个地址就行；
+          AI 写页面时也已经知道它们存在。标「要自备 key」的才需要登记一次。
         </p>
         <div style={{ display: 'grid', gap: 10 }}>
           {catalog.map((c) => (
@@ -262,7 +290,7 @@ export function Connectors({ me }: { me: Me }) {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <b>{c.name}</b>
                   {c.authKind === 'none'
-                    ? <Badge tone="success">免密钥</Badge>
+                    ? <Badge tone="success">免密钥 · 直接可用</Badge>
                     : <Badge tone="warning">要自备 key</Badge>}
                   {installed.has(c.id) && <Badge tone="brand">已登记</Badge>}
                 </div>
@@ -271,12 +299,27 @@ export function Connectors({ me }: { me: Me }) {
                   <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>去哪儿申请：{c.apply}</div>
                 )}
                 <div style={{ fontSize: 12, opacity: .6, marginTop: 4, wordBreak: 'break-all' }}>
-                  <code>{c.baseUrl}{c.example}</code>
+                  {c.authKind === 'none' ? (
+                    <>页面里这样写：<code>fetch('/deploy/api/connect/{c.id}{c.example}')</code></>
+                  ) : (
+                    <code>{c.baseUrl}{c.example}</code>
+                  )}
                 </div>
               </div>
-              <Button onClick={() => pick(c)} disabled={installed.has(c.id)}>
-                {installed.has(c.id) ? '已登记' : '登记'}
-              </Button>
+              {c.authKind === 'none' ? (
+                <Button onClick={() => void navigator.clipboard?.writeText(
+                  `/deploy/api/connect/${c.id}${c.example}`,
+                )}>复制调用地址</Button>
+              ) : (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {me.user.role === 'admin' && !installed.has(c.id) && (
+                    <Button onClick={() => pick(c, true)}>发布为全员</Button>
+                  )}
+                  <Button onClick={() => pick(c)} disabled={installed.has(c.id)}>
+                    {installed.has(c.id) ? '已登记' : '登记给自己'}
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -42,15 +42,15 @@ export function availableFromRows(rows: readonly ConnectorRow[]): AvailableConne
       example: cat?.example ?? '/',
       // 自建连接器没有目录条目，响应结构无从得知。直说，好过让模型猜一个
       returns: cat?.returns ?? '（平台不掌握它的响应结构，先小规模试调一次再写取值路径）',
-      shared: r.user_id === null,
+      scope: r.user_id === null ? 'shared' : 'personal',
     });
   }
 
   for (const c of CONNECTOR_CATALOG) {
     if (c.authKind !== 'none' || seen.has(c.id)) continue;
     out.push({
-      slug: c.id, name: `${c.name}（内置，免登记）`, what: c.what,
-      example: c.example, returns: c.returns, shared: true,
+      slug: c.id, name: c.name, what: c.what,
+      example: c.example, returns: c.returns, scope: 'builtin',
     });
   }
   return out;
@@ -69,8 +69,9 @@ export function describeForModel(list: readonly AvailableConnector[]): string {
       + ' 地址——页面直接调外站会被跨域挡住，写死密钥会被发布链路阻断。'
       + '先用 create-connector 登记一个数据源。';
   }
+  const TAG = { personal: '（仅你自己）', shared: '（全员共享）', builtin: '（平台内置，免登记）' };
   const lines = list.map((c) => [
-    `- ${c.slug}${c.shared ? '（全员共享）' : ''}  ${c.name}`,
+    `- ${c.slug}${TAG[c.scope]}  ${c.name}`,
     `  用途：${c.what}`,
     `  调用：fetch('/deploy/api/connect/${c.slug}${c.example}')`,
     `  返回：${c.returns}`,
@@ -81,6 +82,11 @@ export function describeForModel(list: readonly AvailableConnector[]): string {
     '凭据由平台在服务端注入，**你写的代码里不出现任何 key**。',
     '',
     ...lines,
+    ...(list.some((c) => c.scope === 'personal')
+      ? ['',
+         '⚠️ 标「仅你自己」的连接器**只在你自己打开页面时有效**。这个页面要分享给同事的话，',
+         '改用「全员共享」或「平台内置」的那些，否则同事打开就是一片空白。']
+      : []),
     '',
     '没有一条命中时，不要硬套最接近的那条，也不要自己编一个域名——',
     '用 create-connector 登记一个，或者直接告诉用户平台上还没有这个数据源。',

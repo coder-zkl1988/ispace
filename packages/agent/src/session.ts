@@ -58,15 +58,20 @@ API 地址**——页面直接调外站会被跨域挡住，写死密钥则会�
 请告诉用户「这需要先在控制台『连接器』里登记一个数据源」，并说清楚要登记哪个。`;
   }
 
-  const lines = available.map((c) => {
-    const head = `- **${c.slug}** ${c.name}${c.shared ? '（全员共享）' : ''}`;
-    return [
-      head,
-      `  用途：${c.what}`,
-      `  调用：fetch('/deploy/api/connect/${c.slug}${c.example}')`,
-      `  返回：${c.returns}`,
-    ].join('\n');
-  });
+  const TAG = { personal: '（仅你自己）', shared: '（全员共享）', builtin: '（平台内置）' };
+  const lines = available.map((c) => [
+    `- **${c.slug}** ${c.name}${TAG[c.scope]}`,
+    `  用途：${c.what}`,
+    `  调用：fetch('/deploy/api/connect/${c.slug}${c.example}')`,
+    `  返回：${c.returns}`,
+  ].join('\n'));
+
+  // 只在真有个人连接器时才说这一句。没有的话它是噪音，还会让模型无谓地犹豫
+  const personalWarning = available.some((c) => c.scope === 'personal')
+    ? '\n⚠️ 标「仅你自己」的连接器**只在你自己打开页面时有效**。'
+      + '这个页面要分享给同事的话，改用「全员共享」或「平台内置」的那些，'
+      + '否则同事打开就是一片空白。\n'
+    : '';
 
   return `${SYSTEM_PROMPT}
 
@@ -79,7 +84,7 @@ API 地址**——页面直接调外站会被跨域挡住，写死密钥则会�
 在服务端注入，**你写的代码里不出现任何 key**。
 
 ${lines.join('\n')}
-
+${personalWarning}
 没有一条命中用户需求时，不要硬套一个最接近的，也不要编一个域名。直接说
 「平台上没有能拿这个数据的连接器」，并建议用户去控制台登记。`;
 }
@@ -90,7 +95,14 @@ export interface AvailableConnector {
   what: string;
   example: string;
   returns: string;
-  shared: boolean;
+  /**
+   * 三态而不是「是否共享」的布尔。
+   *   personal —— 本人登记的。**用了它的页面分享给同事会失败**
+   *   shared   —— 管理员发布的，全员可用
+   *   builtin  —— 平台内置目录里免密钥的，不需要登记，人人可用
+   * personal 与另外两者的区别有实际后果，模型必须看得见。
+   */
+  scope: 'personal' | 'shared' | 'builtin';
 }
 
 export interface SessionOptions {
