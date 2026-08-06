@@ -429,10 +429,8 @@ function Root() {
   return (
     <ShellChrome
       appJson={config}
-      // 首页有底部栏，设置走「我」；进到页面内容里没有 tab，才需要齿轮
-      {...(view.kind === 'screen' || soloPage ? { onOpenSettings: () => goTab('me') } : {})}
-      // 更新提示统一收到底栏那条横幅：四个 tab 都看得到，
-      // 不必在页面右上角再挤一枚药丸，底部也不必再压一张卡
+      // 设置只有「我」这一个入口，页面角落不再挂齿轮；更新提示也统一
+      // 收在底栏那条横幅上——用户页面的四个角都还给页面自己
       {...(view.kind === 'screen' ? { onBack: () => setView({ kind: 'home' }) } : {})}
     >
       {/*

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,22 +21,18 @@ import type { AppJson } from '@ispace/contracts';
  * │ 注入，用户既改不掉也删不掉。见 tools/compose-bundle.ts。             │
  * └──────────────────────────────────────────────────────────────────────┘
  *
- * 壳入口位置以设计稿第 07 屏为准：**标题栏右上角常驻齿轮**，由壳绘制、
- * 永远在页面之上，页面布局需避让该角落。这与技术方案 §5.5 写的"贴边
- * 悬浮胶囊"不同，规格 §3.4 已裁定以设计稿为准。
+ * 设计稿第 07 屏原本在标题栏角落画一枚常驻齿轮当壳入口。四 tab 的底栏
+ * 立起来、设置收进「我」之后那枚齿轮被撤掉了（理由见下面 render 里的注释），
+ * app.json 的 shellEntry 于是只剩一个作用：声明页面愿意让出哪一角，
+ * 壳把返回键放到它的对边。
  */
-
-export const SHELL_ENTRY_SIZE = 44;
 
 export function ShellChrome({
   appJson,
   title,
   visitingOwner,
-  onOpenSettings,
   onExitVisiting,
   onBack,
-  hasUpdate,
-  onApplyUpdate,
   children,
 }: {
   appJson: AppJson;
@@ -44,18 +40,9 @@ export function ShellChrome({
   title?: string;
   /** 串门中：正在使用他人的应用（设计稿第 13 屏顶部来源条）。 */
   visitingOwner?: { username: string; displayName: string } | null;
-  /** 不传就不画齿轮。有底部栏的屏用「我」tab 进设置，齿轮是重复的。 */
-  onOpenSettings?: () => void;
   onExitVisiting?: () => void;
   /** 从启动器进到某一屏时给的返回。首页不传，不画返回键。 */
   onBack?: () => void;
-  /**
-   * 有新版页面包可用。做成常驻角标而不是只有底部卡片：
-   * 卡片点了「稍后」就消失了，用户想起来要更新时无处可点，
-   * 只能杀掉 App 重开——这正是要消除的那件事。
-   */
-  hasUpdate?: boolean;
-  onApplyUpdate?: () => void;
   children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -83,7 +70,10 @@ export function ShellChrome({
       <View style={{ flex: 1 }}>
         {children}
 
-        {/* 返回键落在齿轮的对角，两个壳保留位不打架 */}
+        {/*
+          返回键。落在 shellEntry 声明的对边——那一角是页面被要求让出来的，
+          壳自己反倒不该占；返回键按惯例走前缘（默认 edge=right，即左上）。
+        */}
         {onBack && (
           <Pressable
             onPress={onBack}
@@ -102,50 +92,17 @@ export function ShellChrome({
         )}
 
         {/*
-          壳保留位：标题栏角落的齿轮。绝对定位于内容之上，页面包需为该角
-          留出空间（app.json 的 shellEntry 声明其边）。
+          这里曾经常驻一枚齿轮（设计稿第 07 屏的壳保留位）。撤了。
 
-          只在**没有底部栏**的屏出现——首页有「我」tab，那儿再挂一枚齿轮
-          是同一件事给两个入口，还占着页面的角。而进到页面内容里就没有
-          tab 了，这时它是唯一的出口，必须在。
+          它当初的理由是"进到页面里就没有 tab 了，齿轮是唯一的出口"。
+          底栏改成四个 tab、设置收进「我」之后这条不再成立：页面左上角有
+          返回键，退出去就看得见「我」。于是齿轮既不是唯一出口，也不再是
+          最短路径，只是白占着用户页面的一个角——而那一角往往正是页面自己
+          想放东西的地方。
+
+          更新提示同理，已统一收到底栏那条横幅：四个 tab 都看得到，
+          不必在页面右上角再挤一枚药丸。
         */}
-        {onOpenSettings && (
-        <Pressable
-          onPress={onOpenSettings}
-          hitSlop={10}
-          style={[
-            styles.entry,
-            {
-              top: (visitingOwner ? 0 : insets.top) + 6,
-              [appJson.shellEntry.edge === 'left' ? 'left' : 'right']: 10,
-            },
-          ]}
-          accessibilityLabel="壳设置"
-        >
-          {/* 设计稿第 07 屏实测：18px，#545659 */}
-          <Icon name="settings" size={18} color="#545659" />
-          {/* 有新版时齿轮挂一个点：设置页里就有「检查更新」，
-              用户顺着这个点点进去，路径与他已知的一致。 */}
-          {hasUpdate && <View style={styles.entryDot} />}
-        </Pressable>
-        )}
-
-        {/* 一键更新：不必杀掉 App 重开 */}
-        {hasUpdate && onApplyUpdate && (
-          <Pressable
-            onPress={onApplyUpdate}
-            style={[
-              styles.updatePill,
-              {
-                top: (visitingOwner ? 0 : insets.top) + 6,
-                [appJson.shellEntry.edge === 'left' ? 'left' : 'right']: 60,
-              },
-            ]}
-            accessibilityLabel="有新版本，点击更新"
-          >
-            <Text style={styles.updatePillText}>有新版 · 更新</Text>
-          </Pressable>
-        )}
       </View>
     </View>
   );
@@ -268,20 +225,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     zIndex: 9999,
   },
-  entryIcon: { fontSize: 15, color: C.sub },
-  entryDot: {
-    position: 'absolute', top: 4, right: 4,
-    width: 8, height: 8, borderRadius: 4, backgroundColor: '#fb923c',
-    borderWidth: 1.5, borderColor: '#fff',
-  },
-  updatePill: {
-    position: 'absolute', zIndex: 9999,
-    height: 32, paddingHorizontal: 12, borderRadius: 16,
-    backgroundColor: '#fb923c', alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  updatePillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   visitingBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
