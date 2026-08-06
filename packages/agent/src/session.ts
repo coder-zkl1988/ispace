@@ -29,12 +29,81 @@ const SYSTEM_PROMPT = `你是 ispace 内部平台的编码助手，帮助员工�
 
 回答用中文，简短直接。改动完成后用一句话说清楚改了什么。`;
 
+/**
+ * 把这个人能用的连接器拼进系统提示。
+ *
+ * ┌─ 为什么是系统提示而不是再加一个工具 ────────────────────────────────┐
+ * │ 工具是「你去问」，系统提示是「你已经知道」。                          │
+ * │                                                                      │
+ * │ 用户说「做个页面显示今天天气」时，模型要先意识到"我需要外部数据、    │
+ * │ 而这个平台可能有现成的"，才会想到去调 list-connectors。它多半不会——  │
+ * │ 更可能直接编一段假数据，或者写死一个它记忆里的 api.weatherapi.com，  │
+ * │ 那个域名既没登记也调不通。等页面发出去才发现，就晚了。               │
+ * │                                                                      │
+ * │ 清单很短（十条上下），全量内联的 token 成本可以忽略，换来的是模型在  │
+ * │ 决定"数据从哪来"的那一刻就已经知道有什么可用。                        │
+ * └──────────────────────────────────────────────────────────────────────┘
+ *
+ * returns 那一栏尤其不能省：模型写 `data.current.temperature_2m` 时如果不知道
+ * 响应形状就只能猜，猜错是一个运行时才暴露的白屏。
+ */
+export function buildSystemPrompt(available: AvailableConnector[]): string {
+  if (available.length === 0) {
+    return `${SYSTEM_PROMPT}
+
+## 外部数据
+
+这个空间还没有可用的连接器。页面需要外部数据时，**不要凭记忆写一个第三方
+API 地址**——页面直接调外站会被跨域挡住，写死密钥则会被发布链路阻断。
+请告诉用户「这需要先在控制台『连接器』里登记一个数据源」，并说清楚要登记哪个。`;
+  }
+
+  const lines = available.map((c) => {
+    const head = `- **${c.slug}** ${c.name}${c.shared ? '（全员共享）' : ''}`;
+    return [
+      head,
+      `  用途：${c.what}`,
+      `  调用：fetch('/deploy/api/connect/${c.slug}${c.example}')`,
+      `  返回：${c.returns}`,
+    ].join('\n');
+  });
+
+  return `${SYSTEM_PROMPT}
+
+## 外部数据：可用的连接器
+
+页面需要外部数据时**先看这份清单**。命中了就直接用，不要自己去调第三方域名
+——那会被跨域挡住；也不要把密钥写进代码——会被发布链路阻断。
+
+调用一律是同源相对路径 \`/deploy/api/connect/{短名}/{上游路径}\`，凭据由平台
+在服务端注入，**你写的代码里不出现任何 key**。
+
+${lines.join('\n')}
+
+没有一条命中用户需求时，不要硬套一个最接近的，也不要编一个域名。直接说
+「平台上没有能拿这个数据的连接器」，并建议用户去控制台登记。`;
+}
+
+export interface AvailableConnector {
+  slug: string;
+  name: string;
+  what: string;
+  example: string;
+  returns: string;
+  shared: boolean;
+}
+
 export interface SessionOptions {
   engine: Engine;
   toolCtx: ToolContext;
   /** 轮次上限。默认 12——够完成"读几个文件、改两处、请求发布"，又不至于跑飞。 */
   maxTurns?: number;
   tools?: ToolDef[];
+  /**
+   * 这个人能用的连接器。不传等同于空——那种情况下提示词会明确告诉模型
+   * "没有可用数据源、别自己编域名"，而不是留白让它自由发挥。
+   */
+  connectors?: AvailableConnector[];
   onEvent?: (e: SessionEvent) => void;
   signal?: AbortSignal;
 }
@@ -48,9 +117,13 @@ export type SessionEvent =
   | { type: 'error'; message: string };
 
 export class AgentSession {
-  readonly messages: EngineMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
+  readonly messages: EngineMessage[];
 
-  constructor(private readonly opts: SessionOptions) {}
+  constructor(private readonly opts: SessionOptions) {
+    this.messages = [
+      { role: 'system', content: buildSystemPrompt(opts.connectors ?? []) },
+    ];
+  }
 
   /** 追加一条用户消息（可带截图）并跑到收敛。 */
   async send(

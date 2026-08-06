@@ -2,10 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { API_BASE, ERROR_CODES, IspaceError, type User } from '@ispace/contracts';
+import {
+  API_BASE, CONNECTOR_CATALOG, ERROR_CODES, IspaceError, type User,
+} from '@ispace/contracts';
 import { getQuota, listAppsByOwner, writeAudit, type Sql } from '@ispace/db';
 import {
-  AgentSession, createEngine, type SessionEvent, type ToolContext,
+  AgentSession, createEngine,
+  type AvailableConnector, type SessionEvent, type ToolContext,
 } from '@ispace/agent';
 import { z } from 'zod';
 
@@ -72,6 +75,49 @@ export function registerAgentRoutes(
   // NOTE(多实例)：会话与待确认 token 都在内存。横向扩容时必须外置到
   // Redis 或数据库，否则用户的下一个请求打到另一个实例就找不到会话了。
   const sessions = new Map<string, { session: AgentSession; userId: string; touched: number }>();
+
+  /**
+   * 这个人能用的连接器，喂给模型的系统提示。
+   *
+   * 为什么不是让模型自己去调 list-connectors：见 packages/agent/src/session.ts
+   * 里 buildSystemPrompt 的说明——工具是"你去问"，系统提示是"你已经知道"，
+   * 而模型多半不会想到要问。
+   *
+   * 目录里免密钥的那些也一并列出：它们不需要任何登记就能用，让模型为了一个
+   * 天气页面先去催用户"登记一下"，是纯粹的多余步骤。
+   */
+  async function availableConnectors(userId: string): Promise<AvailableConnector[]> {
+    const rows = await sql<{ slug: string; name: string; base_url: string;
+                             catalog_id: string | null; user_id: string | null }[]>`
+      SELECT slug, name, base_url, catalog_id, user_id FROM ispace.connectors
+       WHERE user_id = ${userId} OR user_id IS NULL
+       ORDER BY user_id IS NULL, slug
+    `;
+    const out: AvailableConnector[] = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const cat = CONNECTOR_CATALOG.find((c) => c.id === r.catalog_id);
+      seen.add(r.slug);
+      out.push({
+        slug: r.slug,
+        name: r.name,
+        what: cat?.what ?? r.name,
+        example: cat?.example ?? '/',
+        returns: cat?.returns ?? '（未登记响应结构，先小规模试调一次再写取值路径）',
+        shared: r.user_id === null,
+      });
+    }
+    // 免密钥的目录条目：还没登记也能立刻用，slug 就用目录 id
+    for (const c of CONNECTOR_CATALOG) {
+      if (c.authKind !== 'none' || seen.has(c.id)) continue;
+      out.push({
+        slug: c.id, name: c.name, what: c.what,
+        example: c.example, returns: c.returns, shared: true,
+      });
+    }
+    return out;
+  }
+
   const pending = new Map<string, PendingDeploy>();
 
   /** 定期清理过期会话与 token，防止内存无限增长。 */
@@ -150,7 +196,10 @@ export function registerAgentRoutes(
     }
     if (!entry) {
       entry = {
-        session: new AgentSession({ engine, toolCtx: makeToolCtx(user, req.ip) }),
+        session: new AgentSession({
+          engine, toolCtx: makeToolCtx(user, req.ip),
+          connectors: await availableConnectors(user.id),
+        }),
         userId: user.id,
         touched: Date.now(),
       };
@@ -174,6 +223,7 @@ export function registerAgentRoutes(
     const session = new AgentSession({
       engine,
       toolCtx: makeToolCtx(user, req.ip),
+      connectors: await availableConnectors(user.id),
       onEvent: send,
     });
     // 继承历史（除 system，构造时已有）

@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AgentSession } from '../session.js';
+import { AgentSession, buildSystemPrompt, type AvailableConnector } from '../session.js';
 import { runTool, safePath, type ToolContext } from '../tools.js';
 import type { Engine, EngineEvent, ToolCall } from '../engine.js';
 
@@ -159,5 +159,51 @@ describe('会话循环', () => {
     });
     const r = await s.send('你好');
     expect(r.stopReason).toBe('error');
+  });
+});
+
+/**
+ * 系统提示里的连接器清单。
+ *
+ * 这几条测的不是字符串拼接，是「模型会不会去编一个域名」这件事——
+ * 有清单时它该看见调用方式和响应结构，没清单时该被明确告知别自己编。
+ */
+describe('buildSystemPrompt 里的可用连接器', () => {
+  const one: AvailableConnector = {
+    slug: 'open-meteo', name: '天气预报', what: '任意经纬度的实况与未来天气',
+    example: '/forecast?latitude=39.9&longitude=116.4&current=temperature_2m',
+    returns: 'data.current.temperature_2m → 摄氏度数字',
+    shared: false,
+  };
+
+  it('把调用地址拼成同源相对路径，模型照抄即可', () => {
+    const p = buildSystemPrompt([one]);
+    expect(p).toContain("fetch('/deploy/api/connect/open-meteo/forecast?latitude=39.9");
+  });
+
+  it('带上响应结构——少了它模型只能猜取值路径', () => {
+    expect(buildSystemPrompt([one])).toContain('data.current.temperature_2m');
+  });
+
+  it('标出共享连接器，个人的不标', () => {
+    expect(buildSystemPrompt([{ ...one, shared: true }])).toContain('（全员共享）');
+    expect(buildSystemPrompt([one])).not.toContain('（全员共享）');
+  });
+
+  it('一条都没有时，明确禁止自己编域名，而不是留白', () => {
+    const p = buildSystemPrompt([]);
+    expect(p).toMatch(/不要凭记忆写一个第三方\s*\n?API 地址/);
+    expect(p).toContain('还没有可用的连接器');
+  });
+
+  it('有清单时同样禁止硬套最接近的那条', () => {
+    expect(buildSystemPrompt([one])).toContain('不要硬套一个最接近的');
+  });
+
+  it('原有的平台约束不能被挤掉', () => {
+    for (const p of [buildSystemPrompt([]), buildSystemPrompt([one])]) {
+      expect(p).toContain('不得引入新的原生依赖');
+      expect(p).toContain('不要把密钥硬编码进代码');
+    }
   });
 });

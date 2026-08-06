@@ -101,6 +101,14 @@ export interface CatalogEntry {
   apply?: string;
   /** 一条能直接跑的示例路径，接在 /connect/{slug} 后面。 */
   example: string;
+  /**
+   * 上面那条示例返回什么——**写给 agent 看的**。
+   *
+   * 没有这一条，模型写取值路径时只能猜：`data.current.temperature_2m` 猜成
+   * `data.temperature` 就是一个白屏，而且是运行时才暴露的那种。所以给的不是
+   * 散文描述，是一条真实的取值表达式加它的含义。
+   */
+  returns: string;
   tags: string[];
 }
 
@@ -112,6 +120,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://api.open-meteo.com/v1',
     authKind: 'none',
     example: '/forecast?latitude=39.9&longitude=116.4&current=temperature_2m',
+    returns: 'data.current.temperature_2m → 摄氏度数字；data.current.time → ISO 时间',
     tags: ['天气', '免密钥'],
   },
   {
@@ -121,6 +130,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://api.frankfurter.dev/v1',
     authKind: 'none',
     example: '/latest?base=USD&symbols=CNY',
+    returns: 'data.rates.CNY → 数字；data.base → 基准币种；data.date → 日期',
     tags: ['汇率', '免密钥'],
   },
   {
@@ -130,6 +140,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://open.er-api.com/v6',
     authKind: 'none',
     example: '/latest/USD',
+    returns: 'data.rates.CNY → 数字；data.time_last_update_utc → 更新时间',
     tags: ['汇率', '免密钥'],
   },
   {
@@ -139,6 +150,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://timor.tech/api/holiday',
     authKind: 'none',
     example: '/info/2026-10-01',
+    returns: 'data.type.name → 节日名；data.type.type → 0 工作日/1 周末/2 节日；data.holiday 可能为 null',
     tags: ['日历', '免密钥'],
   },
   {
@@ -148,6 +160,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://api.apihubs.cn/holiday',
     authKind: 'none',
     example: '/get?date=20261001',
+    returns: 'data.list[0].workday → 1 工作日/2 休息日；data.list[0].holiday → 节日编号；data.code → 0 表示成功',
     tags: ['日历', '免密钥'],
   },
   {
@@ -157,6 +170,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://registry.npmjs.org',
     authKind: 'none',
     example: '/react/latest',
+    returns: 'data.version → 版本号字符串；data.description；data.dist.tarball → 下载地址',
     tags: ['研发', '免密钥'],
   },
   {
@@ -166,7 +180,8 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://api.github.com',
     authKind: 'bearer',
     apply: 'GitHub → Settings → Developer settings → Personal access tokens',
-    example: '/repos/facebook/react',
+    example: '/repos/nodejs/node',
+    returns: 'data.stargazers_count → 数字；data.forks_count；data.description；data.full_name',
     tags: ['研发'],
   },
   {
@@ -178,6 +193,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     authName: 'key',
     apply: 'https://lbs.amap.com → 控制台 → 应用管理 → 新建 Key（Web 服务）',
     example: '/weather/weatherInfo?city=110000',
+    returns: 'data.status → "1" 成功；data.lives[0].temperature → 摄氏度字符串；data.lives[0].weather → 天气描述（按高德文档，未实测）',
     tags: ['地图', '天气'],
   },
   {
@@ -189,6 +205,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     authName: 'key',
     apply: 'https://dev.qweather.com → 控制台 → 项目管理 → 创建 KEY',
     example: '/weather/now?location=101010100',
+    returns: 'data.code → "200" 成功；data.now.temp → 摄氏度字符串；data.now.text → 天气描述（按和风文档，未实测）',
     tags: ['天气'],
   },
 ] as const;
