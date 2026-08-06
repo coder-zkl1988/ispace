@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  assertOutboundAllowed, isBlockedAddress, OutboundBlocked, resolveTarget,
+  assertOutboundAllowed, guardedLookup, isBlockedAddress, OutboundBlocked, resolveTarget,
 } from '../services/outbound-guard.js';
 
 /**
@@ -105,5 +105,59 @@ describe('resolveTarget', () => {
   it('子路径里的绝对地址不会把目标换成别的主机', () => {
     const t = resolveTarget(base, 'https://evil.example.net/x', '');
     expect(t.host).toBe('api.example.com');
+  });
+});
+
+/**
+ * lookup 钩子是真正的那道闸——上面 assertOutboundAllowed 只管登记时的提示。
+ * 这里用 localhost 当靶子：它是一个**能解析成功的合法主机名**，解析结果指向
+ * 回环，正是 DNS 重绑定攻击成功之后的样子。不需要联网。
+ */
+describe('guardedLookup（socket 层的闸）', () => {
+  const call = (host: string, opts: object, fn: (e: Error | null, a: unknown, f?: number) => void) =>
+    (guardedLookup(false) as unknown as
+      (h: string, o: object, cb: typeof fn) => void)(host, opts, fn);
+
+  it('解析到回环的主机名连不出去', async () => {
+    const err = await new Promise<Error | null>((res) => {
+      call('localhost', { family: 4 }, (e) => res(e));
+    });
+    expect(err).toBeInstanceOf(OutboundBlocked);
+    expect(err?.message).toMatch(/内网地址/);
+  });
+
+  it('拦下时 address 给空串、family 给 0——net 会照着读，省了会炸', async () => {
+    const got = await new Promise<[Error | null, unknown, number | undefined]>((res) => {
+      call('localhost', { family: 4 }, (e, a, f) => res([e, a, f]));
+    });
+    expect(got[1]).toBe('');
+    expect(got[2]).toBe(0);
+  });
+
+  it('公网 IP 字面量放行，并按调用方要的形状回调', async () => {
+    const single = await new Promise<[Error | null, unknown, number | undefined]>((res) => {
+      call('8.8.8.8', { family: 4 }, (e, a, f) => res([e, a, f]));
+    });
+    expect(single[0]).toBeNull();
+    expect(single[1]).toBe('8.8.8.8');
+    expect(single[2]).toBe(4);
+
+    // options.all 为真时必须回数组——回错形状 net 会静默连不上，表现成莫名超时
+    const all = await new Promise<[Error | null, unknown]>((res) => {
+      call('8.8.8.8', { family: 4, all: true }, (e, a) => res([e, a]));
+    });
+    expect(all[0]).toBeNull();
+    expect(Array.isArray(all[1])).toBe(true);
+    expect((all[1] as { address: string }[])[0]?.address).toBe('8.8.8.8');
+  });
+
+  it('allowPrivate 打开时直接放行内网——这个口子必须是显式的', async () => {
+    const err = await new Promise<Error | null>((res) => {
+      (guardedLookup(true) as unknown as
+        (h: string, o: object, cb: (e: Error | null) => void) => void)(
+        'localhost', { family: 4 }, (e) => res(e),
+      );
+    });
+    expect(err).toBeNull();
   });
 });

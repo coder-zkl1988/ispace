@@ -7,7 +7,9 @@ import { writeAudit, type Sql } from '@ispace/db';
 import {
   ConnectorKeyMissing, decryptSecret, encryptSecret, secretStorageReady,
 } from '../services/connector-secret.js';
-import { assertOutboundAllowed, OutboundBlocked, resolveTarget } from '../services/outbound-guard.js';
+import {
+  assertOutboundAllowed, guardedRequest, OutboundBlocked, resolveTarget,
+} from '../services/outbound-guard.js';
 
 /**
  * 连接器：页面调外部 API 的统一入口（见 migrations/0008_connectors.sql）。
@@ -181,10 +183,11 @@ export function registerConnectorRoutes(
   /**
    * 页面实际调用的就是这个。`/connect/{slug}/剩下的路径?查询`。
    *
-   * 三件事按顺序做，任何一步不过就断在这里：
+   * 三道关卡：
    *   1. 解析连接器（个人优先于共享）
    *   2. 目标必须落在 base_url 前缀内（挡路径穿越与"同主机换个路径"）
-   *   3. 重新校验出站地址（挡 DNS 重绑定）
+   *   3. 地址合法性在 socket 的 lookup 钩子里判——判过的地址就是连过去的
+   *      那一个，没有"先检查后使用"的缝。见 outbound-guard.ts。
    */
   app.all(`${API_BASE}/connect/:slug/*`, connectHandler);
   // 没有子路径的形态：/connect/{slug} 直接打 base_url 本身
@@ -215,9 +218,9 @@ export function registerConnectorRoutes(
     const qs = req.raw.url?.includes('?') ? `?${req.raw.url.split('?').slice(1).join('?')}` : '';
     let target: URL;
     try {
+      // 只校验路径前缀。地址合法性不在这里判——放在 socket 的 lookup 钩子里，
+      // 那才是"判过的地址就是连过去的地址"，见 outbound-guard.ts 的说明。
       target = resolveTarget(c.base_url, rest, qs);
-      // 登记时校验过一次，这里再来一次：DNS 可以在两次之间改指向内网
-      await assertOutboundAllowed(target.toString(), { allowPrivate });
     } catch (e) {
       if (e instanceof OutboundBlocked) {
         await writeAudit(sql, {
@@ -245,27 +248,28 @@ export function registerConnectorRoutes(
     const method = req.method.toUpperCase();
     const hasBody = method !== 'GET' && method !== 'HEAD' && req.body !== undefined;
 
-    let upstream: Response;
+    let upstream;
     try {
-      upstream = await fetch(target, {
-        method,
-        headers,
-        ...(hasBody ? { body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body) } : {}),
-        // 不跟随重定向：一个合法的公网主机 302 到 127.0.0.1 就绕过了前面所有校验。
-        // 上游真要重定向，把 3xx 原样交给调用方去决定。
-        redirect: 'manual',
-        signal: AbortSignal.timeout(20_000),
+      upstream = await guardedRequest(target, {
+        method, headers, allowPrivate,
+        ...(hasBody
+          ? { body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body) }
+          : {}),
       });
     } catch (e) {
+      // 被闸门拦下与上游本身出问题，是两件事，给用户的话也不一样
+      const blocked = e instanceof OutboundBlocked;
       await writeAudit(sql, {
         actorId: me.id, action: 'connector.call', targetType: 'connector',
-        targetId: c.id, source: 'console', result: 'failed',
-        metadata: { slug, host: target.host }, ip: req.ip,
+        targetId: c.id, source: 'console', result: blocked ? 'blocked' : 'failed',
+        metadata: { slug, host: target.host, ...(blocked ? { reason: e.message } : {}) },
+        ip: req.ip,
       });
+      if (blocked) throw new IspaceError(ERROR_CODES.INVALID_INPUT, e.message);
       throw new IspaceError(
         ERROR_CODES.UPSTREAM_ERROR,
         `连接 ${target.host} 失败：${e instanceof Error ? e.message : String(e)}。`
-        + '可能是对方挂了、这台服务器访问不到它，或者超过了 20 秒。',
+        + '可能是对方挂了、这台服务器访问不到它，或者超时。',
       );
     }
 
@@ -276,11 +280,11 @@ export function registerConnectorRoutes(
        WHERE id = ${c.id}
     `.catch(() => { /* 用量统计而已，丢一次无所谓 */ });
 
-    for (const [k, v] of upstream.headers) {
-      if (!DROP_RESPONSE_HEADERS.has(k.toLowerCase())) reply.header(k, v);
+    for (const [k, v] of Object.entries(upstream.headers)) {
+      if (v !== undefined && !DROP_RESPONSE_HEADERS.has(k.toLowerCase())) reply.header(k, v);
     }
     reply.status(upstream.status);
-    return reply.send(Buffer.from(await upstream.arrayBuffer()));
+    return reply.send(upstream.body);
   }
 
   // ── 管理员：谁开了哪些口子 ──────────────────────────────────────

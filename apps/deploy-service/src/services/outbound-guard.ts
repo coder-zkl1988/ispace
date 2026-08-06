@@ -1,5 +1,8 @@
+import { lookup as lookupCb } from 'node:dns';
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { isIP, type LookupFunction } from 'node:net';
 
 /**
  * 出站目标校验。连接器功能唯一的真风险就在这里。
@@ -14,14 +17,22 @@ import { isIP } from 'node:net';
  * 四道防线，缺一不可：
  *   1. 只允许 http/https —— 挡掉 file:// gopher:// 之类
  *   2. 解析主机名，拒绝一切解析到私有/回环/链路本地的地址
- *   3. 每次请求前**重新校验**，不只在登记时校验一次（DNS 重绑定）
+ *   3. 判定发生在 **socket 层的 lookup 钩子里**，不是请求前的一次预检
  *   4. 不跟随重定向 —— 否则一个公网主机 302 到 127.0.0.1 就绕过了前三道
  *
- * 第 3 条与实际连接之间仍有一个 TOCTOU 窗口：校验用的解析结果与随后 fetch
- * 自己的解析是两次独立的 DNS 查询。彻底消除它要自己实现 socket 层的
- * lookup 钩子并把连接钉死到已校验的 IP 上。当前的取舍是：内部平台、调用者
- * 必须是已登录员工、每次调用留审计，这个窗口的收益与实现复杂度不成比例。
- * 如果哪天要对外开放，这里必须先补上。
+ * 第 3 条是关键，值得说清楚为什么非这样不可：
+ *
+ *   「请求前查一次 DNS，通过了再 fetch」看着够用，实则留着一个 TOCTOU 窗口
+ *   ——校验用的那次解析和 fetch 自己发起的那次是**两次独立查询**，攻击者
+ *   控制着权威 DNS 就能让第一次返回公网地址、第二次返回 127.0.0.1。这就是
+ *   DNS 重绑定，它专门吃这种"先检查后使用"的写法。
+ *
+ *   所以判定挪进 net.connect 的 lookup 钩子：钩子返回哪个地址，内核就连哪个
+ *   地址，中间没有第二次解析。一次解析、就地判定、连的就是判过的那一个。
+ *   窗口不是被缩小了，是不存在了。
+ *
+ *   代价是不能再用 fetch —— 它不给传 lookup。改用 node:http/https 自己发，
+ *   顺带把响应体大小上限也补上了（fetch 那版会老老实实把几个 G 缓进内存）。
  */
 
 /** 私有、回环、链路本地、保留段——一律不许。 */
@@ -110,6 +121,118 @@ export async function assertOutboundAllowed(
     }
   }
   return u;
+}
+
+/**
+ * 给 net.connect 用的 lookup 钩子——真正的那道闸。
+ *
+ * 与 assertOutboundAllowed 的分工：那个用在**登记时**，为的是让人填表当场就
+ * 知道地址不行；这个用在**每次连接时**，是安全上说了算的那一个。
+ *
+ * 三个细节都不是可选的：
+ *   - 拿 all:true 把**所有**地址取回来判，只放行第一个合法的等于给轮询 DNS
+ *     留后门（同一个域名交替返回公网与内网地址）
+ *   - 回调的形状要跟调用方要的一致（options.all 决定给数组还是给单个），
+ *     给错了 net 会静默连不上，表现成莫名其妙的超时
+ *   - 出错时 address 传空串、family 传 0，不能省——net 会照着读
+ */
+export function guardedLookup(allowPrivate: boolean): LookupFunction {
+  return ((hostname, options, callback) => {
+    if (allowPrivate) {
+      lookupCb(hostname, options as never, callback as never);
+      return;
+    }
+    lookupCb(hostname, { ...(options as object), all: true }, (err, addresses) => {
+      if (err) { (callback as (e: Error | null, a: string, f: number) => void)(err, '', 0); return; }
+      const list = addresses as unknown as { address: string; family: number }[];
+      for (const a of list) {
+        if (isBlockedAddress(a.address)) {
+          (callback as (e: Error | null, a: string, f: number) => void)(
+            new OutboundBlocked(`${hostname} 解析到内网地址 ${a.address}，不允许访问`), '', 0,
+          );
+          return;
+        }
+      }
+      const wantsAll = (options as { all?: boolean }).all === true;
+      if (wantsAll) { (callback as unknown as (e: null, a: unknown) => void)(null, list); return; }
+      const first = list[0];
+      if (!first) {
+        (callback as (e: Error | null, a: string, f: number) => void)(
+          new OutboundBlocked(`解析不了主机名 ${hostname}`), '', 0,
+        );
+        return;
+      }
+      (callback as (e: Error | null, a: string, f: number) => void)(null, first.address, first.family);
+    });
+  }) as LookupFunction;
+}
+
+/** 上游响应体的上限。超过就掐断——代理不该能被一个巨大的响应拖垮整个进程。 */
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+export interface GuardedResponse {
+  status: number;
+  headers: IncomingHttpHeaders;
+  body: Buffer;
+}
+
+/**
+ * 发一个受控的出站请求。
+ *
+ * 不跟随重定向：node:http 本来就不跟，3xx 原样交回调用方——这正是我们要的，
+ * 跟随等于把前面所有校验作废（公网主机 302 到 127.0.0.1）。
+ */
+export function guardedRequest(
+  target: URL,
+  opts: {
+    method: string;
+    headers: Record<string, string>;
+    body?: string;
+    allowPrivate: boolean;
+    timeoutMs?: number;
+  },
+): Promise<GuardedResponse> {
+  const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+
+  return new Promise<GuardedResponse>((resolve, reject) => {
+    const req = send(
+      target,
+      {
+        method: opts.method,
+        headers: opts.headers,
+        lookup: guardedLookup(opts.allowPrivate),
+        // TLS 的 servername 由 URL 的主机名决定（默认行为），不因为我们钉了 IP 而改变
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on('data', (c: Buffer) => {
+          size += c.length;
+          if (size > MAX_RESPONSE_BYTES) {
+            res.destroy();
+            reject(new OutboundBlocked(
+              `上游返回超过 ${MAX_RESPONSE_BYTES / 1024 / 1024} MB，已中断。`
+              + '连接器是拿数据的，不是下载文件的。',
+            ));
+            return;
+          }
+          chunks.push(c);
+        });
+        res.on('end', () => {
+          resolve({ status: res.statusCode ?? 502, headers: res.headers, body: Buffer.concat(chunks) });
+        });
+        res.on('error', reject);
+      },
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`超过 ${timeoutMs / 1000} 秒没有响应`));
+    });
+    req.on('error', reject);
+    if (opts.body !== undefined) req.write(opts.body);
+    req.end();
+  });
 }
 
 /**
