@@ -68,3 +68,59 @@ export async function checkShellUpdate(): Promise<ShellRelease | null> {
     return null;
   }
 }
+
+
+/**
+ * 下载新版 APK 并唤起系统安装器。
+ *
+ * 「App 内自动安装」的现实边界：**下载可以在 App 内完成、安装器可以自动
+ * 弹出，但最后那一下确认绕不过去**。安卓强制对非系统应用弹安装确认框，
+ * 除非设备是 MDM 托管。承诺"静默升级"是做不到的，所以文案也不那么写。
+ *
+ * 相对"跳浏览器"省掉的是三步：不用离开 App、不用去通知栏翻文件、
+ * 不用自己找到 APK 点开。
+ *
+ * 同样对老壳安全降级：intent-launcher 与 file-system 的 legacy 入口都用
+ * require 包起来，老壳拿不到就返回 false，调用方退回浏览器下载。
+ */
+export async function downloadAndInstall(
+  rel: ShellRelease,
+  onProgress: (ratio: number) => void,
+): Promise<boolean> {
+  try {
+    /* eslint-disable @typescript-eslint/no-var-requires */
+    const FS = require('expo-file-system/legacy') as {
+      cacheDirectory: string;
+      createDownloadResumable: (
+        url: string, to: string, opts: unknown,
+        cb: (p: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => void,
+      ) => { downloadAsync: () => Promise<{ uri: string } | undefined> };
+      getContentUriAsync: (uri: string) => Promise<string>;
+    };
+    const Intent = require('expo-intent-launcher') as {
+      startActivityAsync: (action: string, params: Record<string, unknown>) => Promise<unknown>;
+    };
+    /* eslint-enable @typescript-eslint/no-var-requires */
+
+    // 文件名带构建号：同一路径反复覆盖时，安装器可能拿到上一版的缓存
+    const to = `${FS.cacheDirectory}ispace-${rel.versionCode}.apk`;
+    const task = FS.createDownloadResumable(rel.url, to, {}, (p) => {
+      if (p.totalBytesExpectedToWrite > 0) {
+        onProgress(p.totalBytesWritten / p.totalBytesExpectedToWrite);
+      }
+    });
+    const done = await task.downloadAsync();
+    if (!done?.uri) return false;
+
+    // 安装器只接受 content:// —— 直接给 file:// 会抛 FileUriExposedException
+    const content = await FS.getContentUriAsync(done.uri);
+    await Intent.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
+      data: content,
+      type: 'application/vnd.android.package-archive',
+      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION，否则安装器读不到这个文件
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}

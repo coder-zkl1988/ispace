@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { checkShellUpdate, type ShellRelease } from '../runtime/shell-update';
+import { checkShellUpdate, downloadAndInstall, type ShellRelease } from '../runtime/shell-update';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   openSystemSettings, permissionStates, setCapabilityEnabled,
@@ -51,6 +51,8 @@ export function Settings(p: SettingsProps) {
   /** 壳的新版本。查不到（老壳没有那个原生模块、或没网）就一直是 null。 */
   const [shellUp, setShellUp] = useState<ShellRelease | null>(null);
   useEffect(() => { void checkShellUpdate().then(setShellUp); }, []);
+  /** 下载进度 0–1；null 表示还没开始。 */
+  const [dl, setDl] = useState<number | null>(null);
   const v = versionInfo();
 
   const loadPerms = () => void permissionStates().then(setPerms);
@@ -90,15 +92,38 @@ export function Settings(p: SettingsProps) {
           版式与启动器里那条「创意市场」一致——同一套语言，不另起炉灶。
         */}
         {shellUp && (
-          <Pressable style={styles.shellCard} onPress={() => void Linking.openURL(shellUp.url)}>
+          <Pressable
+            style={styles.shellCard}
+            disabled={dl !== null}
+            onPress={() => void (async () => {
+              setDl(0);
+              const ok = await downloadAndInstall(shellUp, setDl);
+              // 下不了（老壳没有那两个原生模块、或存储写不进）就退回浏览器，
+              // 总好过点了没反应
+              if (!ok) { setDl(null); void Linking.openURL(shellUp.url); }
+            })()}
+          >
             <View style={styles.shellIcon}><Text style={styles.shellIconText}>↓</Text></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.shellTitle}>有新版本 App</Text>
-              <Text style={styles.shellBody}>
-                {(shellUp.sizeBytes / 1048576).toFixed(0)} MB · 构建 {shellUp.versionCode}
+              <Text style={styles.shellTitle}>
+                {dl === null ? '有新版本 App' : '正在下载新版本'}
               </Text>
+              {dl === null ? (
+                <Text style={styles.shellBody}>
+                  {(shellUp.sizeBytes / 1048576).toFixed(0)} MB · 构建 {shellUp.versionCode}
+                </Text>
+              ) : (
+                <View style={styles.dlTrack}>
+                  <View style={[styles.dlFill, { width: `${Math.round(dl * 100)}%` }]} />
+                </View>
+              )}
             </View>
-            <View style={styles.shellBtn}><Text style={styles.shellBtnText}>更新</Text></View>
+            {dl === null && (
+              <View style={styles.shellBtn}><Text style={styles.shellBtnText}>更新</Text></View>
+            )}
+            {dl !== null && (
+              <Text style={styles.dlPct}>{Math.round(dl * 100)}%</Text>
+            )}
           </Pressable>
         )}
 
@@ -243,8 +268,11 @@ const C = {
 const styles = StyleSheet.create({
   shellCard: {
     flexDirection: 'row', alignItems: 'center', gap: 11,
-    backgroundColor: '#fff', borderRadius: 14, padding: 12, marginBottom: 16,
-    borderWidth: 1, borderColor: 'rgba(0,0,0,.07)',
+    // 与账号卡同一套盒子：横向 16、圆角 16、同一组描边色。
+    // 之前只写了 marginBottom，于是它比上面那张宽出 32、还贴着它。
+    marginHorizontal: 16, marginTop: 12, padding: 12,
+    backgroundColor: C.surface, borderRadius: 16,
+    borderWidth: 1, borderColor: C.border,
   },
   shellIcon: {
     width: 34, height: 34, borderRadius: 11, backgroundColor: '#fb923c',
@@ -258,6 +286,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 7,
   },
   shellBtnText: { color: '#fff', fontSize: 12.5, fontWeight: '600' },
+  dlTrack: {
+    height: 4, borderRadius: 2, marginTop: 7,
+    backgroundColor: 'rgba(0,0,0,.08)', overflow: 'hidden',
+  },
+  dlFill: { height: 4, borderRadius: 2, backgroundColor: '#fb923c' },
+  dlPct: { fontSize: 12, color: '#909599', fontVariant: ['tabular-nums'] },
   root: { flex: 1, backgroundColor: C.canvas },
   head: {
     flexDirection: 'row', alignItems: 'center',

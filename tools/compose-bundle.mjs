@@ -39,6 +39,7 @@ const NATIVE_ALLOWLIST = new Set([
   'expo', 'expo-updates', 'expo-secure-store', 'expo-local-authentication',
   'expo-camera', 'expo-notifications', 'expo-image-picker', 'expo-av',
   'expo-web-browser', 'expo-build-properties', 'expo-application',
+  'expo-intent-launcher',
   'expo-file-system', 'expo-font',
   'react', 'react-native',
   'react-native-safe-area-context', 'react-native-svg', 'react-native-webview',

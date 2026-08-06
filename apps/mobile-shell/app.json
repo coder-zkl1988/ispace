@@ -49,13 +49,14 @@
         "RECORD_AUDIO",
         "READ_MEDIA_IMAGES",
         "USE_BIOMETRIC",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "REQUEST_INSTALL_PACKAGES"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#fb923c"
       },
-      "versionCode": 4
+      "versionCode": 5
     },
     "splash": {
       "image": "./assets/splash-icon.png",

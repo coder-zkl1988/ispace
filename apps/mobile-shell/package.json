@@ -20,6 +20,7 @@
     "expo-file-system": "^19.0.23",
     "expo-font": "~14.0.12",
     "expo-image-picker": "~17.0.0",
+    "expo-intent-launcher": "^57.0.1",
     "expo-local-authentication": "~17.0.0",
     "expo-notifications": "~0.32.0",
     "expo-secure-store": "~15.0.0",
