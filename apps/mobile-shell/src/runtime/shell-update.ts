@@ -83,10 +83,22 @@ export async function checkShellUpdate(): Promise<ShellRelease | null> {
  * 同样对老壳安全降级：intent-launcher 与 file-system 的 legacy 入口都用
  * require 包起来，老壳拿不到就返回 false，调用方退回浏览器下载。
  */
+/**
+ * App 内下载安装是从哪一版壳开始有的。
+ *
+ * 不能靠 try/catch 探测：老壳里那两个原生模块不存在，而 require 触发的是
+ * **原生层的 abort**，JS 的 try/catch 拦不住——进程直接死，表现为白屏。
+ * 这与 WebView 那次 ClassCastException 是同一类：不经过 JS 的错误，
+ * 任何 JS 层防御都无效。所以只能用一个静态事实来判断：构建号。
+ */
+const INAPP_INSTALL_MIN_BUILD = 5;
+
 export async function downloadAndInstall(
   rel: ShellRelease,
   onProgress: (ratio: number) => void,
 ): Promise<boolean> {
+  // 老壳直接说"做不了"，让调用方退回浏览器。绝不能走到下面的 require
+  if (rel.installed < INAPP_INSTALL_MIN_BUILD) return false;
   try {
     /* eslint-disable @typescript-eslint/no-var-requires */
     const FS = require('expo-file-system/legacy') as {
