@@ -96,6 +96,7 @@ export function Connectors({ me }: { me: Me }) {
   };
 
   const installed = new Set((rows ?? []).map((r) => r.catalogId).filter(Boolean));
+  const selectedCatalog = catalog.find((c) => c.id === form.catalogId);
 
   return (
     <div>
@@ -256,8 +257,17 @@ export function Connectors({ me }: { me: Me }) {
           )}
           {form.authKind !== 'none' && (
             <label>
-              <div style={{ fontSize: 12.5, opacity: .7, marginBottom: 4 }}>
-                凭据——存进去就读不回来了，自己另存一份
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', gap: 12,
+                fontSize: 12.5, opacity: .7, marginBottom: 4,
+              }}>
+                <span>凭据——存进去就读不回来了，自己另存一份</span>
+                {selectedCatalog?.applyUrl && (
+                  <a href={selectedCatalog.applyUrl} target="_blank" rel="noreferrer"
+                    style={{ color: 'var(--link)', whiteSpace: 'nowrap' }}>
+                    申请 Key ↗
+                  </a>
+                )}
               </div>
               <Input type="password" value={form.secret} autoComplete="off"
                 onChange={(e) => setForm({ ...form, secret: e.target.value })} />
@@ -292,7 +302,9 @@ export function Connectors({ me }: { me: Me }) {
                 </div>
                 <div style={{ fontSize: 13, opacity: .8, marginTop: 4, lineHeight: 1.6 }}>{c.what}</div>
                 {c.apply && (
-                  <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>去哪儿申请：{c.apply}</div>
+                  <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>
+                    去哪儿申请：{c.apply}
+                  </div>
                 )}
                 <div style={{ fontSize: 12, opacity: .6, marginTop: 4, wordBreak: 'break-all' }}>
                   {c.authKind === 'none' ? (
@@ -307,9 +319,16 @@ export function Connectors({ me }: { me: Me }) {
                   复制调用地址
                 </Button>
               ) : (
-                <Button onClick={() => pick(c)} disabled={installed.has(c.id)}>
-                  {installed.has(c.id) ? '已登记' : '登记'}
-                </Button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {c.applyUrl && (
+                    <Button onClick={() => window.open(c.applyUrl, '_blank', 'noopener,noreferrer')}>
+                      去申请
+                    </Button>
+                  )}
+                  <Button onClick={() => pick(c)} disabled={installed.has(c.id)}>
+                    {installed.has(c.id) ? '已登记' : '登记'}
+                  </Button>
+                </div>
               )}
             </div>
           ))}

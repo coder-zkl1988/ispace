@@ -99,6 +99,8 @@ export interface CatalogEntry {
   authName?: string;
   /** 需要凭据的，告诉用户去哪儿申请。 */
   apply?: string;
+  /** 厂商官方的凭据申请或管理入口。 */
+  applyUrl?: string;
   /** 一条能直接跑的示例路径，接在 /connect/{slug} 后面。 */
   example: string;
   /**
@@ -180,6 +182,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     baseUrl: 'https://api.github.com',
     authKind: 'bearer',
     apply: 'GitHub → Settings → Developer settings → Personal access tokens',
+    applyUrl: 'https://github.com/settings/tokens',
     example: '/repos/nodejs/node',
     returns: 'data.stargazers_count → 数字；data.forks_count；data.description；data.full_name',
     tags: ['研发'],
@@ -192,6 +195,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     authKind: 'query',
     authName: 'key',
     apply: 'https://lbs.amap.com → 控制台 → 应用管理 → 新建 Key（Web 服务）',
+    applyUrl: 'https://console.amap.com/dev/key/app',
     example: '/weather/weatherInfo?city=110000',
     returns: 'data.status → "1" 成功；data.lives[0].temperature → 摄氏度字符串；data.lives[0].weather → 天气描述（按高德文档，未实测）',
     tags: ['地图', '天气'],
@@ -204,6 +208,7 @@ export const CONNECTOR_CATALOG: readonly CatalogEntry[] = [
     authKind: 'query',
     authName: 'key',
     apply: 'https://dev.qweather.com → 控制台 → 项目管理 → 创建 KEY',
+    applyUrl: 'https://console.qweather.com/project',
     example: '/weather/now?location=101010100',
     returns: 'data.code → "200" 成功；data.now.temp → 摄氏度字符串；data.now.text → 天气描述（按和风文档，未实测）',
     tags: ['天气'],

@@ -209,9 +209,26 @@ export class DokployOrchestrator implements Orchestrator {
     });
     const text = await res.text();
     if (!res.ok) {
+      const upstream = text;
+      let reason = '上游编排器拒绝了请求';
+      try {
+        const parsed = JSON.parse(text) as {
+          message?: string;
+          data?: { zodError?: { fieldErrors?: Record<string, string[]> } };
+        };
+        const fields = parsed.data?.zodError?.fieldErrors;
+        const fieldText = fields
+          ? Object.entries(fields).flatMap(([field, messages]) =>
+              messages.map((message) => `${field}: ${message}`)).join('；')
+          : '';
+        reason = fieldText || parsed.message || reason;
+      } catch {
+        reason = text.trim().slice(0, 500) || reason;
+      }
       throw new IspaceError(
         ERROR_CODES.ORCHESTRATOR_FAILED,
-        `Dokploy ${procedure} 失败（HTTP ${res.status}）：${text.slice(0, 200)}`,
+        `Dokploy ${procedure} 失败（HTTP ${res.status}）：${reason}`,
+        { procedure, httpStatus: res.status, upstream },
       );
     }
     try {

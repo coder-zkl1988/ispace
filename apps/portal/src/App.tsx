@@ -824,13 +824,17 @@ function AppCard({
     : 'status.stopped',
   );
   return (
-    <Card hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+    <Card
+      hoverable
+      onClick={() => { location.href = url; }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+    >
       {app.coverUrl && <CoverBanner src={app.coverUrl} alt={app.name} />}
       <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
         {/* 有封面 banner 时字母块是重复的视觉标识，撤掉；没封面才靠它认页面 */}
         {!app.coverUrl && <AppIcon letter={app.iconLetter} />}
         <div style={{ minWidth: 0, flex: 1 }}>
-          <a href={url} style={{
+          <a href={url} onClick={(e) => e.stopPropagation()} style={{
             display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
             font: 'var(--weight-semibold) var(--text-card-title)/1.3 var(--font-sans)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -862,7 +866,7 @@ function AppCard({
         >{c('action.share')}</button>
         {/* 去控制台的「我的页面」tab。原先指 #/apps/{slug}，那不是合法的
             screen key，控制台会落到默认屏——点「管理」却到了别处。 */}
-        <a href="/console#/pages" style={{
+        <a href="/console#/pages" onClick={(e) => e.stopPropagation()} style={{
           fontSize: 'var(--text-sm)', color: 'var(--link)', textDecoration: 'none',
         }}>{c('action.manage')}</a>
       </div>

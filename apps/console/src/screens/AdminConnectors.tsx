@@ -137,12 +137,21 @@ export function AdminConnectors() {
                 </div>
                 <div style={{ fontSize: 13, opacity: .8, marginTop: 4, lineHeight: 1.6 }}>{c.what}</div>
                 {c.apply && (
-                  <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>去哪儿申请：{c.apply}</div>
+                  <div style={{ fontSize: 12, opacity: .65, marginTop: 4 }}>
+                    去哪儿申请：{c.apply}
+                  </div>
                 )}
               </div>
-              <Button onClick={() => pick(c)} disabled={publishedSlugs.has(c.id)}>
-                {publishedSlugs.has(c.id) ? '已发布' : '发布'}
-              </Button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {c.applyUrl && (
+                  <Button onClick={() => window.open(c.applyUrl, '_blank', 'noopener,noreferrer')}>
+                    去申请
+                  </Button>
+                )}
+                <Button onClick={() => pick(c)} disabled={publishedSlugs.has(c.id)}>
+                  {publishedSlugs.has(c.id) ? '已发布' : '发布'}
+                </Button>
+              </div>
             </div>
           ))}
         </div>
