@@ -709,7 +709,7 @@ function InstalledSection({
             <Card key={a.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
               {a.cover_path && <CoverBanner src={a.cover_path} alt={a.name} />}
               <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
-                <AppIcon letter={a.icon_letter} />
+                {!a.cover_path && <AppIcon letter={a.icon_letter} />}
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <a href={url} style={{
                     display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
@@ -763,28 +763,24 @@ function AppCard({
     <Card hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
       {app.coverUrl && <CoverBanner src={app.coverUrl} alt={app.name} />}
       <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
-        <AppIcon letter={app.iconLetter} />
+        {/* 有封面 banner 时字母块是重复的视觉标识，撤掉；没封面才靠它认页面 */}
+        {!app.coverUrl && <AppIcon letter={app.iconLetter} />}
         <div style={{ minWidth: 0, flex: 1 }}>
           <a href={url} style={{
             display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
             font: 'var(--weight-semibold) var(--text-card-title)/1.3 var(--font-sans)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{app.name}</a>
-          <div className="mono" style={{
-            fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {location.host}{url}
-          </div>
+          {/* 副标题用页面简介，不再显示那串地址——地址点标题就到，念它没意义。
+              没简介就留空，不硬塞一行占位。 */}
+          {app.description && (
+            <div style={{
+              fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginTop: 2,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>{app.description}</div>
+          )}
         </div>
       </div>
-
-      {app.description && (
-        <p style={{
-          margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)',
-          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-        }}>{app.description}</p>
-      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)', marginTop: 'auto' }}>
         <StatusDot status={app.status} label={statusLabel} />
@@ -1008,7 +1004,7 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
           <Card key={l.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
             {l.cover_path && <CoverBanner src={l.cover_path} alt={l.name} />}
             <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
-              <AppIcon letter={l.icon_letter} />
+              {!l.cover_path && <AppIcon letter={l.icon_letter} />}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <a href={`/${l.owner_username}/${l.slug}/`} style={{
                   display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
