@@ -623,7 +623,7 @@ function MyPages({
       )}
 
       {isOwner && backends.length > 0 && (
-        <BackendSection items={backends} owner={owner} />
+        <BackendSection items={backends} owner={owner} onChanged={reloadApps} />
       )}
       {isOwner && filteredInstalled.length > 0 && (
         <InstalledSection items={filteredInstalled} onRemoved={reloadApps} />
@@ -689,8 +689,13 @@ function Section({
  * 访问地址是 /svc/{user}/{name}/ 而非 /{user}/{app}/。混进上面的卡片墙会
  * 让人以为能像页面那样回滚、看版本——那些对后端不成立。
  */
-function BackendSection({ items, owner }: { items: ExposedBackend[]; owner: string }) {
+function BackendSection({
+  items, owner, onChanged,
+}: { items: ExposedBackend[]; owner: string; onChanged: () => Promise<void> }) {
   const c = useCopy();
+  // 分享弹窗由这一层持有——和页面卡片墙同样的做法（见上面那层的注释）：
+  // 卡片是纯展示，弹窗不该在每张卡里各开一个。
+  const [sharing, setSharing] = useState<ExposedBackend | null>(null);
   return (
     <section style={{ marginBottom: 'var(--space-16)' }}>
       <div style={{ marginBottom: 'var(--space-8)' }}>
@@ -727,21 +732,78 @@ function BackendSection({ items, owner }: { items: ExposedBackend[]; owner: stri
                 <StatusDot status={running ? 'running' : 'stopped'}
                   label={running ? c('status.running') : c('status.stopped')} />
                 <div style={{ flex: 1 }} />
-                {/* 分享=复制链接。谁能打开由可见性决定（在控制台后端屏改），
-                    公开的发给谁都能开；private/shared 的对方得有权限。 */}
+                {/* 与页面卡片同一个动作：点「分享」开同一个弹窗，弹窗里就能改三档
+                    可见性、加减同事、复制链接、扫码——后端和页面到这里再无差别。 */}
                 <button
-                  onClick={(e) => { e.stopPropagation(); void copyText(`${location.origin}${url}`); }}
+                  onClick={(e) => { e.stopPropagation(); setSharing(b); }}
                   style={{
                     border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
                     fontSize: 'var(--text-sm)', color: 'var(--link)',
                   }}
-                >复制链接</button>
+                >{c('action.share')}</button>
+                <a href="/console#/backends" onClick={(e) => e.stopPropagation()} style={{
+                  fontSize: 'var(--text-sm)', color: 'var(--link)', textDecoration: 'none',
+                }}>{c('action.manage')}</a>
               </div>
             </Card>
           );
         })}
       </div>
+      {sharing && (
+        <BackendShareDialog
+          backend={sharing}
+          owner={owner}
+          onClose={() => setSharing(null)}
+          onChanged={onChanged}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * 后端分享弹窗的数据接线——与 AppShareDialog 同构，只是接到 backends 的
+ * 那套接口。后端没有「待接受」流程，授权即时生效，所以名单里的人一律标为
+ * 已接受（status:'accepted'），弹窗里就不会显示「等对方接受」。
+ */
+function BackendShareDialog({
+  backend, owner, onClose, onChanged,
+}: { backend: ExposedBackend; owner: string; onClose: () => void; onChanged: () => Promise<void> }) {
+  const [peers, setPeers] = useState<SharePeerInfo[]>([]);
+
+  const loadPeers = useCallback(() => {
+    void api.backendShares(backend.id)
+      .then((r) => setPeers(r.shares.map((s) => ({
+        shareId: s.username, username: s.username, displayName: s.displayName, status: 'accepted' as const,
+      }))))
+      .catch(() => setPeers([]));
+  }, [backend.id]);
+  useEffect(loadPeers, [loadPeers]);
+
+  return (
+    <ShareDialog
+      open
+      appName={backend.name}
+      shareUrl={`${location.origin}/svc/${owner}/${backend.name}/`}
+      visibility={backend.visibility as ShareVisibility}
+      peers={peers}
+      onClose={onClose}
+      onVisibilityChange={async (v) => {
+        await api.setBackendVisibility(backend.id, v);
+        loadPeers();
+        await onChanged();
+      }}
+      onAddPeer={async (username) => {
+        await api.shareBackend(backend.id, username);
+        loadPeers();
+        await onChanged();
+      }}
+      onRemovePeer={async (username) => {
+        await api.revokeBackendShareTo(backend.id, username);
+        loadPeers();
+        await onChanged();
+      }}
+    />
   );
 }
 

@@ -207,6 +207,17 @@ export const api = {
       .then((r) => r.json() as Promise<{ ok: boolean }>),
   installed: () => get<{ installed: InstalledApp[] }>('/installed'),
   backends: () => get<{ backends: ExposedBackend[] }>('/backends'),
+  /* 后端的分享与页面同一套：三档可见性 + 指定同事名单。服务端路由早在
+     「露出到空间」时就建好了，这里只补 portal 侧的客户端方法。后端没有
+     「待接受」流程，授权即时生效，所以名单里的人一律当已接受。 */
+  backendShares: (id: string) =>
+    get<{ shares: { username: string; displayName: string }[] }>(`/backends/${id}/shares`),
+  setBackendVisibility: (id: string, visibility: 'private' | 'public' | 'shared') =>
+    patch<{ ok: boolean }>(`/backends/${id}`, { visibility }),
+  shareBackend: (id: string, toUsername: string) =>
+    post<{ ok: boolean }>(`/backends/${id}/shares`, { toUsername }),
+  revokeBackendShareTo: (id: string, username: string) =>
+    del<{ ok: boolean }>(`/backends/${id}/shares/${encodeURIComponent(username)}`),
   /** 把别人的页面从我的空间移除。分享来的与市场装的都走这一个。 */
   removeInstalled: (appId: string) => del<{ ok: boolean }>(`/installed/${appId}`),
   /** 管理员下架别人上架的内容。只下架，不删应用。 */
