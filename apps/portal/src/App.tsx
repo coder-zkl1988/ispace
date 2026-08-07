@@ -3,7 +3,7 @@ import { MARKETPLACE_CATEGORIES, type App as AppEntity, type AppGroup } from '@i
 import {
   AppIcon, Avatar, AvatarMenu, Badge, Button, Card, CoverBanner, Dialog, fmtBytes, fmtDate,
   GlobalKeyframes, Greeting, Icon, Input, SectionLabel, ShareDialog, StatusDot,
-  QrCode, Select, Tabs, Toast, ToneProvider, copyText, useCopy, type ShareVisibility,
+  QrCode, Tabs, Toast, ToneProvider, copyText, useCopy, type ShareVisibility,
 } from '@ispace/ui';
 import {
   api, ownerFromPath,
@@ -705,8 +705,9 @@ function BackendSection({ items, owner }: { items: ExposedBackend[]; owner: stri
           const running = b.status === 'running';
           return (
             <Card key={b.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {b.hasCover && <CoverBanner src={`/deploy/api/backends/${b.id}/cover`} alt={b.name} />}
               <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
-                <AppIcon letter={b.name.slice(0, 1)} />
+                {!b.hasCover && <AppIcon letter={b.name.slice(0, 1)} />}
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <a href={url} style={{
                     display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
@@ -725,6 +726,16 @@ function BackendSection({ items, owner }: { items: ExposedBackend[]; owner: stri
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)', marginTop: 'auto' }}>
                 <StatusDot status={running ? 'running' : 'stopped'}
                   label={running ? c('status.running') : c('status.stopped')} />
+                <div style={{ flex: 1 }} />
+                {/* 分享=复制链接。谁能打开由可见性决定（在控制台后端屏改），
+                    公开的发给谁都能开；private/shared 的对方得有权限。 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); void copyText(`${location.origin}${url}`); }}
+                  style={{
+                    border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
+                    fontSize: 'var(--text-sm)', color: 'var(--link)',
+                  }}
+                >复制链接</button>
               </div>
             </Card>
           );
@@ -1060,14 +1071,24 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
     );
   }
 
-  // 各分类的条数；侧边栏只列有内容的分类，空的不摆。
+  // 分类：AI 决定、可自造，未分类归「其他」。侧边栏按实际出现的分类聚合——
+  // 不再限定在固定清单里，AI 造的新分类也会自动成为一档。
+  const catOf = (l: Listing) => l.category?.trim() || '其他';
   const counts = new Map<string, number>();
-  for (const l of listings) counts.set(l.category, (counts.get(l.category) ?? 0) + 1);
-  const cats = MARKETPLACE_CATEGORIES.filter((cName) => counts.has(cName));
+  for (const l of listings) counts.set(catOf(l), (counts.get(catOf(l)) ?? 0) + 1);
+  // 排序：建议清单里的按清单顺序在前，AI 自造的按名称跟其后，「其他」永远垫底。
+  const cats = [...counts.keys()].sort((a, b) => {
+    if (a === '其他') return 1; if (b === '其他') return -1;
+    const ia = (MARKETPLACE_CATEGORIES as readonly string[]).indexOf(a);
+    const ib = (MARKETPLACE_CATEGORIES as readonly string[]).indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1; if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
 
   const kw = q.trim().toLowerCase();
   const visible = listings.filter((l) =>
-    (cat === null || l.category === cat)
+    (cat === null || catOf(l) === cat)
     && (!kw || `${l.name} ${l.description ?? ''} ${l.owner_name}`.toLowerCase().includes(kw)),
   );
 
@@ -1082,6 +1103,13 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
           同事选择「分享到全公司」的页面都在这里，添加即用
         </p>
       </div>
+
+      {/* 作者卡片上分类输入框的建议：建议清单 + 已有分类，去重 */}
+      <datalist id="ispace-market-cats">
+        {[...new Set([...MARKETPLACE_CATEGORIES, ...cats])].map((cName) => (
+          <option key={cName} value={cName} />
+        ))}
+      </datalist>
 
       <div style={{ display: 'flex', gap: 'var(--space-16)', alignItems: 'flex-start' }}>
         {/* 侧边栏：分类。sticky 让它在长列表滚动时留在视野里 */}
@@ -1134,11 +1162,21 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
               {l.mine ? (
                 <>
                   <Badge tone="brand">你发布的</Badge>
-                  {/* 作者就地归类：改完立刻反映到侧边栏。别人的卡片不显示这个 */}
-                  <Select
-                    value={l.category}
-                    onChange={(v) => void api.setListingCategory(l.app_id, v).then(load)}
-                    items={MARKETPLACE_CATEGORIES.map((cName) => ({ value: cName, label: cName }))}
+                  {/* 作者就地改分类。可输入的组合框（不是固定下拉）——分类现在由 AI
+                      决定、可自造，作者也该能填清单外的词；datalist 给建议 + 已有分类。 */}
+                  <input
+                    defaultValue={l.category ?? ''}
+                    list="ispace-market-cats"
+                    placeholder="分类"
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v && v !== (l.category ?? '')) void api.setListingCategory(l.app_id, v).then(load);
+                    }}
+                    style={{
+                      width: 96, height: 28, padding: '0 var(--space-5)',
+                      border: '1px solid var(--border)', borderRadius: 'var(--radius-8)',
+                      fontSize: 'var(--text-sm)', background: 'var(--surface-1)', color: 'var(--text-primary)',
+                    }}
                   />
                 </>
               ) : (

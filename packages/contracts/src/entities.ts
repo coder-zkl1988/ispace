@@ -68,15 +68,19 @@ export const appStatusSchema = z.enum(['running', 'building', 'stopped']);
 export const appVisibilitySchema = z.enum(['private', 'shared', 'public']);
 
 /**
- * 创意市场的分类。固定一小组、三端共用——分类的价值在「大家用同一套词」，
- * 让它可自由填就退化成一堆近义词（"工具/小工具/效率"），侧边栏就没法聚合了。
- * 默认「其他」：没归类的页面照样上架，只是先落在这一格，作者可随时改。
+ * 创意市场分类的**建议清单**。
+ *
+ * 分类由做页面的 AI 在 MCP 里定（deploy/set-visibility 时给）——它最清楚这个
+ * 页面是什么。清单只是给它一组常见词打底、以及给作者在界面上一个下拉：
+ * **AI 认为都不合适时可以自己造一个新分类**，不受这个清单约束（产品决策）。
+ * 所以 schema 是自由文本，不是枚举；空/未给按「其他」聚合。
  */
 export const MARKETPLACE_CATEGORIES = [
-  '效率工具', '数据看板', '表单问卷', '游戏娱乐', '官网展示', '生活服务', '其他',
+  '效率工具', '数据看板', '表单问卷', '游戏娱乐', '旅行攻略', '官网展示', '生活服务', '其他',
 ] as const;
 export type MarketplaceCategory = (typeof MARKETPLACE_CATEGORIES)[number];
-export const marketplaceCategorySchema = z.enum(MARKETPLACE_CATEGORIES);
+/** 自由文本：AI 可自造分类。留长度上限，避免有人塞一整句话进来当分类。 */
+export const marketplaceCategorySchema = z.string().trim().min(1).max(24);
 
 export const appSchema = z.object({
   id,
@@ -101,6 +105,11 @@ export const appSchema = z.object({
   lastAccessedAt: ts.nullable(),
   createdAt: ts,
   updatedAt: ts,
+  /**
+   * 创意市场分类。由做页面的 AI 决定（自由文本，可自造）；未分类为 null。
+   * 只在页面上架时用于市场侧边栏聚合。
+   */
+  category: z.string().nullable(),
   /**
    * 做出这个页面的提示词，供创意市场的「做同款」使用。
    * 上架后对全公司可见——发布方要为里面的内容负责（工具描述里已警示）。
@@ -198,6 +207,8 @@ export const backendSchema = z.object({
   exposed: z.boolean(),
   /** 露出后的访问范围，与页面同义。 */
   visibility: appVisibilitySchema,
+  /** 是否已有封面截图（经 GET /backends/:id/cover 取）。 */
+  hasCover: z.boolean(),
   /** 编排器侧的应用标识（Dokploy applicationId）。 */
   orchestratorRef: z.string().nullable(),
   createdAt: ts,

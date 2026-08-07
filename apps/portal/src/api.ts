@@ -96,7 +96,7 @@ export interface Listing {
   type: string; status: string;
   owner_username: string; owner_name: string;
   installed: boolean; mine: boolean;
-  category: string;
+  category: string | null;
   /**
    * 做出这个页面的那段提示词（apps.source_prompt）。
    *
@@ -116,7 +116,7 @@ export interface InstalledApp {
 
 export interface ExposedBackend {
   id: string; name: string; urlPath: string; status: string;
-  visibility: 'private' | 'shared' | 'public'; exposed: boolean;
+  visibility: 'private' | 'shared' | 'public'; exposed: boolean; hasCover: boolean;
 }
 
 export interface AuthPolicy {

@@ -84,3 +84,38 @@ export async function screenshotCover(
     running -= 1;
   }
 }
+
+/**
+ * 截一个 URL 的首屏，返回 PNG 字节；失败返回 null。
+ *
+ * 与 screenshotCover（截 file://）同源，只是目标是 http URL——给露出的后端
+ * 截封面：chromium 在 deploy-service 容器里，能按容器名直连后端。
+ */
+export async function screenshotUrlToBuffer(url: string): Promise<Buffer | null> {
+  if (!coverShotAvailable()) return null;
+  if (running >= MAX_CONCURRENT) return null;
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  running += 1;
+  const dir = await mkdtemp(join(tmpdir(), 'ispace-shot-'));
+  const out = join(dir, 'shot.png');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile(CHROMIUM, [
+        '--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+        '--hide-scrollbars', '--force-device-scale-factor=1',
+        `--window-size=${SHOT_W},${SHOT_H}`, '--virtual-time-budget=3000',
+        `--screenshot=${out}`, url,
+      ], { timeout: 30_000, killSignal: 'SIGKILL' }, (err) => (err ? reject(err) : resolve()));
+      child.on('error', reject);
+    });
+    if (!existsSync(out)) return null;
+    return await readFile(out);
+  } catch {
+    return null;
+  } finally {
+    running -= 1;
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}

@@ -64,6 +64,8 @@ export interface DeployInput {
   description?: string | undefined;
   /** 「做同款」的提示词，随发布带上；省略时保留该应用已有的。 */
   sourcePrompt?: string | undefined;
+  /** 创意市场分类，由做页面的 AI 给（自由文本，可自造）。省略保留已有的。 */
+  category?: string | undefined;
   type?: 'static' | 'static_backend' | 'h5';
   source: 'mcp' | 'cli' | 'agent' | 'console';
   /**
@@ -183,6 +185,10 @@ export class DeployService {
         .filter((rel) => !rel.includes('/'));
       const cover = extractCover(html, rootFiles, `/${user.username}/${slug}/`);
       await this.sql`UPDATE ispace.apps SET cover_path = ${cover} WHERE id = ${app.id}`;
+      // 分类：AI 给了才更新，没给保留已有的——重发不该把分类清掉。
+      if (input.category) {
+        await this.sql`UPDATE ispace.apps SET category = ${input.category} WHERE id = ${app.id}`;
+      }
 
       // 没声明封面 → 后台自动截一张兜底（方案 B）。**不 await**：截图要几秒、
       // 且是锦上添花，不该让发布响应等它。截好后单独回写 cover_path，下次卡片

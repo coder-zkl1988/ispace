@@ -6,6 +6,7 @@ import {
 import { getPlatformPolicy, getQuota, writeAudit, type Sql } from '@ispace/db';
 import { createBackend, toBackend } from '../services/backend.js';
 import { updateBackendSchema } from '@ispace/contracts';
+import { coverShotAvailable, screenshotUrlToBuffer } from '../services/cover-shot.js';
 import { backendUrlPath, type Orchestrator } from '@ispace/orchestrator';
 
 /**
@@ -31,7 +32,10 @@ export function registerBackendRoutes(
   app.get(`${API_BASE}/backends`, async (req) => {
     const me = await requireAuth(req);
     const rows = await sql`
-      SELECT * FROM ispace.backends WHERE owner_id = ${me.id} ORDER BY created_at
+      SELECT id, owner_id, app_id, name, source_repo, cpu_limit, mem_limit_mb, status,
+             url_path, port, exposed, visibility, container_name, orchestrator_ref, created_at,
+             (cover IS NOT NULL) AS has_cover
+        FROM ispace.backends WHERE owner_id = ${me.id} ORDER BY created_at
     `;
     const backends = rows.map((r) => toBackend(r as Record<string, unknown>));
 
@@ -116,12 +120,34 @@ export function registerBackendRoutes(
        WHERE id = ${id}
       RETURNING *
     `;
+    // 露出后台截一张封面（best-effort，不 await）。容器在 dokploy-network 上按
+    // 服务名可达；stirling 这类带 context-path 的后端在 url_path 下服务，所以
+    // 截 http://{container}:{port}{url_path}/。
+    const b = updated[0] as { exposed: boolean; container_name: string | null; port: number; url_path: string };
+    if (b.exposed && b.container_name && coverShotAvailable()) {
+      void screenshotUrlToBuffer(`http://${b.container_name}:${b.port}${b.url_path}/`)
+        .then((png) => {
+          if (png) return sql`UPDATE ispace.backends SET cover = ${png}, cover_updated_at = now() WHERE id = ${id}`;
+        })
+        .catch(() => { /* best-effort */ });
+    }
     await writeAudit(sql, {
       actorId: me.id, action: 'backend.update', targetType: 'backend',
       targetId: id, source: 'console', result: 'success',
       metadata: { exposed: input.exposed, visibility: input.visibility }, ip: req.ip,
     });
     return { backend: toBackend(updated[0] as Record<string, unknown>) };
+  });
+
+  // ── 封面图 ────────────────────────────────────────────────────────
+  // 存库的截图字节。公开可取（封面不敏感），卡片直接 <img src> 它。
+  app.get(`${API_BASE}/backends/:id/cover`, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const rows = await sql<{ cover: Buffer | null }[]>`SELECT cover FROM ispace.backends WHERE id = ${id}`;
+    const png = rows[0]?.cover;
+    if (!png) return reply.status(404).send();
+    return reply.header('content-type', 'image/png')
+      .header('cache-control', 'public, max-age=300').send(png);
   });
 
   // ── 后端分享（shared 可见档的授权名单）─────────────────────────────

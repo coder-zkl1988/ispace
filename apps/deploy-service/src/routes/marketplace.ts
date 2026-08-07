@@ -31,7 +31,7 @@ export function registerMarketplaceRoutes(
   app.get(`${API_BASE}/marketplace`, async (req) => {
     const me = await requireAuth(req);
     const rows = await sql`
-      SELECT m.id, m.app_id, m.published_at, m.install_count, m.category,
+      SELECT m.id, m.app_id, m.published_at, m.install_count, a.category,
              a.slug, a.name, a.description, a.icon_letter, a.cover_path, a.type, a.status,
              a.source_prompt,
              u.username AS owner_username, u.display_name AS owner_name,
@@ -65,12 +65,13 @@ export function registerMarketplaceRoutes(
     if (!owned[0]) throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能上架自己的页面');
 
     // 幂等：重复上架不报错，只刷新时间
+    if (category) {
+      await sql`UPDATE ispace.apps SET category = ${category} WHERE id = ${appId}`;
+    }
     const rows = await sql`
-      INSERT INTO ispace.marketplace_listings (app_id, published_by, category)
-      VALUES (${appId}, ${me.id}, ${category ?? '其他'})
-      ON CONFLICT (app_id) DO UPDATE SET
-        published_at = now(),
-        category = COALESCE(${category ?? null}, ispace.marketplace_listings.category)
+      INSERT INTO ispace.marketplace_listings (app_id, published_by)
+      VALUES (${appId}, ${me.id})
+      ON CONFLICT (app_id) DO UPDATE SET published_at = now()
       RETURNING *
     `;
     await sql`UPDATE ispace.apps SET visibility = 'public' WHERE id = ${appId}`;
@@ -88,8 +89,8 @@ export function registerMarketplaceRoutes(
     const { appId } = req.params as { appId: string };
     const { category } = z.object({ category: marketplaceCategorySchema }).parse(req.body);
     const owned = await sql`SELECT 1 FROM ispace.apps WHERE id = ${appId} AND owner_id = ${me.id}`;
-    if (!owned[0]) throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能改自己上架的页面。');
-    await sql`UPDATE ispace.marketplace_listings SET category = ${category} WHERE app_id = ${appId}`;
+    if (!owned[0]) throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能改自己的页面。');
+    await sql`UPDATE ispace.apps SET category = ${category} WHERE id = ${appId}`;
     return { ok: true };
   });
 

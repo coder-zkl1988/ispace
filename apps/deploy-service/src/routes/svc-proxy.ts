@@ -112,15 +112,25 @@ export function registerSvcProxy(
     }
 
     // ── 代理 ────────────────────────────────────────────────────────
-    // 剥掉 /svc/{user}/{name} 前缀，容器侧监听的是自己的根。
-    const rest = (req.params as Record<string, string>)['*'] ?? '';
-    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    const upstreamPath = `/${rest}${qs}`;
+    // **不剥前缀**，原样把 /svc/{user}/{name}/... 转给容器。
+    //
+    // 曾经剥掉前缀（容器侧当自己在根），结果带前台的后端全废：它们生成的是
+    // 绝对链接（/login、/assets/x.js），浏览器会拿平台根去解析 → 打到
+    // workspace.sy.soyoung.com/login 而不是这个后端。所以后端的公开基址就是
+    // /svc/{user}/{name}，它必须在这个前缀下服务（Spring 的 SYSTEM_ROOTURIPATH、
+    // 或认 X-Forwarded-Prefix 的框架都能自适应）。原样转发才对，也正是切换前
+    // Dokploy 的行为（stripPath=false）。纯 API 后端由页面同源相对调用，同样成立。
+    const upstreamPath = req.url;
 
     const headers: Record<string, string | string[]> = {};
     for (const [k, v] of Object.entries(req.headers)) {
       if (v !== undefined && !DROP_HEADERS.has(k.toLowerCase())) headers[k] = v;
     }
+    // 在 loop 之后设，确保 prefix 一定是我算的值。让认这些头的框架
+    // （Spring forward-headers、多数 Node 中间件）自己拼出正确的绝对链接，
+    // backend 不必写死自己的 base path。
+    headers['x-forwarded-prefix'] = `/svc/${user}/${name}`;
+    headers['x-forwarded-proto'] = (req.headers['x-forwarded-proto'] as string) ?? 'https';
 
     // 缓冲上游响应再用 Fastify 托管地回。
     //

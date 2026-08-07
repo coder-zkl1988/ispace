@@ -248,7 +248,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
     switch (name) {
       case 'deploy': {
         const { site, zip, ...rest } = args as
-          { site: string; zip: string; name?: string; description?: string; prompt?: string };
+          { site: string; zip: string; name?: string; description?: string; prompt?: string; category?: string };
         // zip 由客户端读取后以 base64 传入；MCP 没有文件上传语义
         const dir = await mkdtemp(join(tmpdir(), 'ispace-mcp-'));
         const zipPath = join(dir, 'artifact.zip');
@@ -257,7 +257,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
           const out = await deployService.deploy({
             user, slug: site, zipPath, source: 'mcp',
             name: rest.name, description: rest.description,
-            sourcePrompt: rest.prompt, clientIp,
+            sourcePrompt: rest.prompt, category: rest.category, clientIp,
           });
           return `已发布 ${out.app.name} v${out.release.version}\n访问地址：${out.url}\n大小：${fmtBytes(out.release.sizeBytes)}`;
         } finally {
@@ -598,7 +598,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
 
       // ── 分享 ──────────────────────────────────────────────────────
       case 'set-visibility': {
-        const { site, visibility } = args as { site: string; visibility: 'private' | 'public' | 'shared' };
+        const { site, visibility, category } = args as { site: string; visibility: 'private' | 'public' | 'shared'; category?: string };
         const a = await findApp(sql, user.id, site);
         if (!a) throw new IspaceError(ERROR_CODES.NOT_FOUND, `没有找到应用 /${site}`);
 
@@ -612,6 +612,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
           `;
           revoked = r.length;
         } else if (visibility === 'public') {
+          if (category) await sql`UPDATE ispace.apps SET category = ${category} WHERE id = ${a.id}`;
           await sql`
             INSERT INTO ispace.marketplace_listings (app_id, published_by)
             VALUES (${a.id}, ${user.id})

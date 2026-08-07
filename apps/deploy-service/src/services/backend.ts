@@ -65,6 +65,7 @@ export interface Backend {
   exposed: boolean;
   /** 露出后的访问范围，与页面同义。exposed=false 时无意义。 */
   visibility: 'private' | 'shared' | 'public';
+  hasCover: boolean;
   containerName: string | null;
   orchestratorRef: string | null;
   createdAt: Date;
@@ -85,6 +86,7 @@ export function toBackend(r: Record<string, unknown>): Backend {
     port: Number(r.port ?? 3000),
     exposed: Boolean(r.exposed),
     visibility: (r.visibility as 'private' | 'shared' | 'public') ?? 'private',
+    hasCover: Boolean(r.has_cover ?? (r.cover != null)),
     containerName: (r.container_name as string | null) ?? null,
     orchestratorRef: r.orchestrator_ref as string | null,
     createdAt: r.created_at as Date,
