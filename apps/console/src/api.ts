@@ -24,8 +24,17 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers,
   });
-  const body = (await res.json()) as T & { code?: string; message?: string };
-  if (!res.ok) throw Object.assign(new Error(body.message ?? '请求失败'), { code: body.code });
+  const body = (await res.json()) as T & {
+    code?: string;
+    message?: string;
+    details?: Record<string, unknown>;
+  };
+  if (!res.ok) {
+    throw Object.assign(new Error(body.message ?? '请求失败'), {
+      code: body.code,
+      details: body.details,
+    });
+  }
   return body as T;
 }
 
@@ -288,6 +297,7 @@ export interface CatalogEntry {
   authKind: ConnectorRow['authKind'];
   authName?: string;
   apply?: string;
+  applyUrl?: string;
   example: string;
   tags: string[];
 }

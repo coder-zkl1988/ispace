@@ -22,18 +22,37 @@ export function Backends({ me }: { me: Me }) {
   const [form, setForm] = useState({ name: '', sourceRepo: '', port: '3000' });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [showErrorDetail, setShowErrorDetail] = useState(false);
   /** 展开中的那条的部署日志。失败的后端不看日志就只剩「失败」两个字。 */
   const [logOf, setLogOf] = useState<{ id: string; name: string; text: string } | null>(null);
 
+  const captureError = (error: unknown) => {
+    const e = error as Error & { details?: Record<string, unknown> };
+    setMsg(e.message);
+    if (!e.details) {
+      setErrorDetail(null);
+    } else {
+      const { upstream, ...context } = e.details;
+      const contextText = Object.keys(context).length
+        ? `${JSON.stringify(context, null, 2)}\n\n`
+        : '';
+      setErrorDetail(`${contextText}${typeof upstream === 'string'
+        ? upstream
+        : JSON.stringify(upstream ?? e.details, null, 2)}`);
+    }
+    setShowErrorDetail(false);
+  };
+
   const load = () => void api.backends()
     .then((r) => { setList(r.backends); setLimits(r.limits); setOrchestrator(r.orchestrator); })
-    .catch((e: Error) => setMsg(e.message));
+    .catch(captureError);
   useEffect(load, []);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setErrorDetail(null);
     try { await fn(); setMsg(ok); load(); }
-    catch (e) { setMsg((e as Error).message); }
+    catch (e) { captureError(e); }
     finally { setBusy(false); }
   };
 
@@ -106,7 +125,16 @@ export function Backends({ me }: { me: Me }) {
           限额 <span className="num">{limits.cpu}</span> vCPU / <span className="num">{limits.memoryMb}</span> MB
           由平台在创建时强制写入，不可自行调整。
         </p>
-        {msg && <p style={{ margin: 'var(--space-6) 0 0', fontSize: 'var(--text-base)' }}>{msg}</p>}
+        {msg && (
+          <div style={{ margin: 'var(--space-6) 0 0', fontSize: 'var(--text-base)' }}>
+            <span>{msg}</span>
+            {errorDetail ? (
+              <Button size="sm" variant="ghost" onClick={() => setShowErrorDetail(true)}>
+                查看完整错误
+              </Button>
+            ) : null}
+          </div>
+        )}
       </Card>
 
       {list.length === 0 ? (
@@ -154,7 +182,7 @@ export function Backends({ me }: { me: Me }) {
                             try {
                               const r = await api.backendLogs(b.id);
                               setLogOf({ id: b.id, name: b.name, text: r.log ?? r.reason ?? '没有日志' });
-                            } catch (e) { setMsg((e as Error).message); }
+                            } catch (e) { captureError(e); }
                             finally { setBusy(false); }
                           })()}>为什么失败</Button>
                       )}
@@ -212,6 +240,28 @@ export function Backends({ me }: { me: Me }) {
           >
             {logOf.text}
           </pre>
+        </Dialog>
+      )}
+      {errorDetail && showErrorDetail && (
+        <Dialog
+          open
+          title="完整错误信息"
+          description="这是编排器返回的原始错误，排查时可以直接复制。"
+          width={720}
+          onClose={() => setShowErrorDetail(false)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => void copyText(errorDetail)}>复制错误</Button>
+              <Button onClick={() => setShowErrorDetail(false)}>知道了</Button>
+            </>
+          }
+        >
+          <pre className="mono" style={{
+            margin: 0, padding: 'var(--space-6)', borderRadius: 'var(--radius-md)',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            fontSize: 'var(--text-sm)', lineHeight: 1.7, maxHeight: 360,
+            overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+          }}>{errorDetail}</pre>
         </Dialog>
       )}
       {confirmUI}
