@@ -51,6 +51,18 @@
 		}
 	}
 
+	# 后端服务：/svc/{user}/{name}/... → deploy-service 的鉴权代理。
+	#
+	# 此前 /svc 由 Dokploy 生成 Traefik 路由、直连容器，绕过一切鉴权（谁知道
+	# URL 就能访问）；而 Dokploy 的路由文件自动生成、手改会被覆盖，也没有挂
+	# 中间件的口子。所以把 /svc 接管过来：deploy-service 先按三档可见性鉴权，
+	# 再按库里存的 container_name:port 代到容器。见 routes/svc-proxy.ts。
+	#
+	# 放在保留字 503 兜底之前——否则会被那条当成"未部署"直接 503。
+	handle /svc* {
+		reverse_proxy ispace-deploy-service:3100
+	}
+
 	# ── 保留路径的兜底：明确 503，绝不落到 portal ──────────────────────
 	#
 	# 这些路径本应由 Traefik 在到达 Caddy 之前就路由到各自的服务
@@ -67,7 +79,7 @@
 	# 注意：handle 只接受单个 matcher，多个路径模式必须先定义命名 matcher。
 	# 写成 `handle /a* /b* { }` 会在 caddy validate 时报
 	# "wrong argument count or unexpected line ending"。
-	@reservedUnbound path /deploy* /supabase* /updates* /svc* /api*
+	@reservedUnbound path /deploy* /supabase* /updates* /api*
 	handle @reservedUnbound {
 		header Content-Type "application/json; charset=utf-8"
 		respond `{"code":"SERVICE_UNAVAILABLE","message":"该保留路径对应的服务未部署，或网关绑定失效。这是平台路径，不会回落到用户空间。"}` 503

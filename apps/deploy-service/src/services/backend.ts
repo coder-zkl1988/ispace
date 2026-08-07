@@ -164,9 +164,18 @@ export async function createBackend(
       name: input.name,
       ...(input.sourceRepo ? { sourceRepo: input.sourceRepo } : {}),
     });
-    // 端口错了的表现是 502——容器起着、平台显示运行中，就是打不开。
-    // 所以它必须来自用户，不能写死。
-    await orchestrator.bindPath(ref, publicHost, urlPath, input.port ?? 3000);
+    /*
+      不再让编排器（Dokploy）绑 /svc 域名。
+
+      /svc 现在由 iSpace 自己接管：Caddy 把 /svc 转给 deploy-service 的鉴权代理，
+      代理按库里存的 container_name:port 直连容器（见 routes/svc-proxy.ts）。
+      容器在 dokploy-network 上以服务名可解析，不依赖 Traefik 有没有给它建路由，
+      所以这里不再需要 bindPath。少了它，后端就不会有一条绕过鉴权的对外路由。
+
+      publicHost 于是在本流程用不到了；保留形参是因为编排器接口仍暴露 bindPath
+      （存量后端的迁移、以及别的编排器实现可能用得上）。
+    */
+    void publicHost;
 
     /*
       配置源并触发部署。
