@@ -119,13 +119,21 @@ export async function createUser(
     RETURNING *
   `;
   const user = toUser(rows[0]);
-  // 配额行与用户同生共死，缺了会导致控制台读不到配额而报错
+  // 配额行与用户同生共死，缺了会导致控制台读不到配额而报错。
+  //
+  // 用管理员在「默认配额」里设的当前值（platform_policy），不是硬编码常量。
+  // 之前一直用常量，导致那个设置改了也不生效——新老用户都拿 500M，UI 却显示
+  // 改后的值，两边永远对不上。getPlatformPolicy 在表/列缺失时会自己回落到常量。
+  //
+  // 只影响**新开通**的用户：已注册用户各自的 quotas 行是当初的快照，不动。
+  const policy = await getPlatformPolicy(sql);
   await sql`
     INSERT INTO ispace.quotas (user_id, storage_bytes_limit, backend_count_limit, db_rows_limit)
-    VALUES (${user.id}, ${DEFAULT_QUOTAS.storageBytesLimit},
-            ${DEFAULT_QUOTAS.backendCountLimit}, ${DEFAULT_QUOTAS.dbRowsLimit})
+    VALUES (${user.id}, ${policy.storageBytesLimit},
+            ${policy.backendCountLimit}, ${DEFAULT_QUOTAS.dbRowsLimit})
     ON CONFLICT (user_id) DO NOTHING
   `;
+  // 数据行上限 platform_policy 里没有对应列，仍用常量——这里只有它还走常量。
   return user;
 }
 
