@@ -197,6 +197,33 @@ export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
 }
 
 /** 应用卡片左上角的单字图标底板。设计稿里每个应用都有。 */
+/**
+ * 卡片顶部的封面 banner。没有封面 URL 时**什么都不渲染**——由调用方决定
+ * 回落到 AppIcon 字母块，卡片布局与从前完全一致。
+ *
+ * 一张图加载失败（产物删了、跨域挡了）不该在卡片顶部留一块碎图 icon：
+ * onError 时把自己收起来，视觉上等同于「这张卡没有封面」。
+ */
+export function CoverBanner({
+  src, alt, height = 132,
+}: { src: string; alt: string; height?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <div style={{
+      // 出血到卡片边缘：抵掉 Card 的 padding(--space-10)，上圆角对齐 Card(--radius-16)
+      margin: 'calc(-1 * var(--space-10)) calc(-1 * var(--space-10)) 0',
+      height, overflow: 'hidden', borderRadius: 'var(--radius-16) var(--radius-16) 0 0',
+      background: 'var(--surface-sunken, #f3f3ee)',
+    }}>
+      <img
+        src={src} alt={alt} loading="lazy" onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+    </div>
+  );
+}
+
 export function AppIcon({ letter, size = 40 }: { letter: string; size?: number }) {
   // 尺寸/圆角/字号字重均取自设计稿实测：40×40、r12、16px/700
   return (

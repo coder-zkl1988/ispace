@@ -73,8 +73,13 @@ export const appSchema = z.object({
   slug: appSlugSchema,
   name: z.string().min(1).max(32),
   description: z.string().max(200).nullable(),
-  /** 设计稿卡片左上角的单字图标底板。 */
+  /** 设计稿卡片左上角的单字图标底板。没有封面时卡片显示它。 */
   iconLetter: z.string().min(1).max(2),
+  /**
+   * 卡片封面图。发布时从产物里取（og:image 或 cover.png），
+   * 是 <img src> 直接能用的地址；没有则为 null，卡片回落到 iconLetter。
+   */
+  coverUrl: z.string().nullable(),
   type: appTypeSchema,
   status: appStatusSchema,
   currentReleaseId: id.nullable(),

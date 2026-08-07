@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { App as AppEntity, AppGroup } from '@ispace/contracts';
 import {
-  AppIcon, Avatar, AvatarMenu, Badge, Button, Card, Dialog, fmtBytes, fmtDate,
+  AppIcon, Avatar, AvatarMenu, Badge, Button, Card, CoverBanner, Dialog, fmtBytes, fmtDate,
   GlobalKeyframes, Greeting, Icon, Input, SectionLabel, ShareDialog, StatusDot,
   QrCode, Tabs, Toast, ToneProvider, copyText, useCopy, type ShareVisibility,
 } from '@ispace/ui';
@@ -707,6 +707,7 @@ function InstalledSection({
           const url = `/${a.owner_username}/${a.slug}/`;
           return (
             <Card key={a.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {a.cover_path && <CoverBanner src={a.cover_path} alt={a.name} />}
               <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
                 <AppIcon letter={a.icon_letter} />
                 <div style={{ minWidth: 0, flex: 1 }}>
@@ -760,6 +761,7 @@ function AppCard({
   );
   return (
     <Card hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      {app.coverUrl && <CoverBanner src={app.coverUrl} alt={app.name} />}
       <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
         <AppIcon letter={app.iconLetter} />
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -1004,6 +1006,7 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
       <div style={{ display: 'grid', gap: 'var(--space-8)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
         {listings.map((l) => (
           <Card key={l.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+            {l.cover_path && <CoverBanner src={l.cover_path} alt={l.name} />}
             <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
               <AppIcon letter={l.icon_letter} />
               <div style={{ minWidth: 0, flex: 1 }}>

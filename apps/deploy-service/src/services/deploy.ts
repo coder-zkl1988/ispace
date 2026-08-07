@@ -24,6 +24,7 @@ import {
 } from '@ispace/contracts';
 import {
   collectFiles,
+  extractCover,
   dirSize,
   extractZip,
   injectShellScript,
@@ -168,6 +169,17 @@ export class DeployService {
         sizeBytes, path: stamp, publishedBy: user.id,
       });
 
+      // ── 封面 ────────────────────────────────────────────────────
+      // 从产物里取声明的封面（og:image / cover.png），存进 apps.cover_path，
+      // 卡片据此显示 banner。html 是注入平台脚本前读的原文，meta 不受影响。
+      // 取不到就写 null——覆盖旧版本可能声明过、这版删掉了的情况，让卡片
+      // 干净地回落到字母块，而不是挂着一张上个版本的图。
+      const rootFiles = files
+        .map((f) => f.slice(root.length + 1))
+        .filter((rel) => !rel.includes('/'));
+      const cover = extractCover(html, rootFiles, `/${user.username}/${slug}/`);
+      await this.sql`UPDATE ispace.apps SET cover_path = ${cover} WHERE id = ${app.id}`;
+
       await refreshStorageUsage(this.sql, user.id);
       await pruneReleases(this.storage, user.username, slug, KEEP_RELEASES, stamp);
       await writeAudit(this.sql, {
@@ -176,7 +188,7 @@ export class DeployService {
         metadata: { slug, version, sizeBytes },
       });
 
-      return { app: { ...app, status: 'running', currentReleaseId: release.id, sizeBytes }, release, url: this.appUrl(user.username, slug) };
+      return { app: { ...app, status: 'running', currentReleaseId: release.id, sizeBytes, coverUrl: cover }, release, url: this.appUrl(user.username, slug) };
     } finally {
       await rm(staging, { recursive: true, force: true });
     }

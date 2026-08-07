@@ -30,7 +30,7 @@ export function registerMarketplaceRoutes(
     const me = await requireAuth(req);
     const rows = await sql`
       SELECT m.id, m.app_id, m.published_at, m.install_count,
-             a.slug, a.name, a.description, a.icon_letter, a.type, a.status,
+             a.slug, a.name, a.description, a.icon_letter, a.cover_path, a.type, a.status,
              a.source_prompt,
              u.username AS owner_username, u.display_name AS owner_name,
              EXISTS (
@@ -167,7 +167,7 @@ export function registerMarketplaceRoutes(
   app.get(`${API_BASE}/installed`, async (req) => {
     const me = await requireAuth(req);
     const rows = await sql`
-      SELECT i.source, a.id, a.slug, a.name, a.description, a.icon_letter,
+      SELECT i.source, a.id, a.slug, a.name, a.description, a.icon_letter, a.cover_path,
              a.type, a.status, a.updated_at,
              u.username AS owner_username, u.display_name AS owner_name
         FROM ispace.app_installs i

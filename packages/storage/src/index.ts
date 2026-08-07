@@ -249,6 +249,55 @@ export function dirSize(dir: string): number {
 }
 
 /**
+ * 从产物里认出一张封面图，返回卡片 <img src> 能直接用的地址；认不出返回 null。
+ *
+ * 两种声明方式，按优先级：
+ *   1. index.html 里的 <meta property="og:image" content="…">（web 标准，
+ *      AI 本来就会写；也兼容 name="og:image" 和 name="cover" 两种写法）
+ *   2. 产物根目录放一张 cover.png / .jpg / .jpeg / .webp
+ *
+ * 只认这两种、且只接受 http(s) 绝对地址或站内相对路径——把结果拼进 <img src>
+ * 时若混进 javascript:/data: 就是一个 XSS 面。相对地址一律挂到 siteBase 之下
+ * （/{user}/{slug}/），因为产物部署在子路径，根绝对路径会 404，跟 base path
+ * 那条约束同一个道理。
+ *
+ * siteBase 传进来时应以 / 结尾，如 "/zhangming/zhoubao/"。
+ * rootFiles 是产物根目录下的文件名（不含子目录，小写比较）。
+ */
+const COVER_FILES = ['cover.png', 'cover.jpg', 'cover.jpeg', 'cover.webp'];
+
+export function extractCover(
+  indexHtml: string,
+  rootFiles: readonly string[],
+  siteBase: string,
+): string | null {
+  const base = siteBase.endsWith('/') ? siteBase : `${siteBase}/`;
+
+  // 站内相对地址 → 挂到 base 下；http(s) 绝对地址原样用；其余（javascript:/
+  // data:/ 协议相对//…）一律拒绝，宁可没有封面也不往 img src 里塞可疑东西。
+  const resolve = (raw: string): string | null => {
+    const v = raw.trim();
+    if (!v) return null;
+    if (/^https?:\/\//i.test(v)) return v;
+    if (/^(javascript|data|vbscript):/i.test(v) || v.startsWith('//')) return null;
+    return base + v.replace(/^\.?\//, '');
+  };
+
+  // meta 标签属性顺序不定，content 可能在 property 前，所以先框出每个 <meta>
+  // 再各自取 property/name 与 content，别用一条大正则去赌顺序
+  for (const tag of indexHtml.match(/<meta\b[^>]*>/gi) ?? []) {
+    const key = tag.match(/\b(?:property|name)\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase();
+    if (key !== 'og:image' && key !== 'cover') continue;
+    const content = tag.match(/\bcontent\s*=\s*["']([^"']*)["']/i)?.[1];
+    const url = content ? resolve(content) : null;
+    if (url) return url;
+  }
+
+  const hit = COVER_FILES.find((f) => rootFiles.some((r) => r.toLowerCase() === f));
+  return hit ? base + hit : null;
+}
+
+/**
  * 向 index.html 注入平台 chrome（技术方案 §4.7）。
  *
  * 选择发布期注入而非网关运行期改写：后者需给 Caddy 引入响应体重写插件，

@@ -92,6 +92,7 @@ export interface PendingShare {
 export interface Listing {
   id: string; app_id: string; published_at: string; install_count: number;
   slug: string; name: string; description: string | null; icon_letter: string;
+  cover_path: string | null;
   type: string; status: string;
   owner_username: string; owner_name: string;
   installed: boolean; mine: boolean;
@@ -107,7 +108,8 @@ export interface Listing {
 export interface InstalledApp {
   source: 'share' | 'marketplace';
   id: string; slug: string; name: string; description: string | null;
-  icon_letter: string; type: string; status: string; updated_at: string;
+  icon_letter: string; cover_path: string | null;
+  type: string; status: string; updated_at: string;
   owner_username: string; owner_name: string;
 }
 

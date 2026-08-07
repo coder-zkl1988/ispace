@@ -46,6 +46,7 @@ const toApp = (r: any): App => ({
   name: r.name,
   description: r.description,
   iconLetter: r.icon_letter,
+  coverUrl: r.cover_path ?? null,
   type: r.type,
   status: r.status,
   currentReleaseId: r.current_release_id,

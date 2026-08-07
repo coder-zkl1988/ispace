@@ -18,6 +18,7 @@ describe('app schema', () => {
     name: '周报助手',
     description: '随手记几句，周五自动汇总。',
     iconLetter: '周',
+    coverUrl: null,
     type: 'static' as const,
     status: 'running' as const,
     currentReleaseId: uuid,

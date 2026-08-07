@@ -9,6 +9,7 @@ import {
   makeStamp,
   resolveArtifactRoot,
   switchSymlink,
+  extractCover,
 } from '../index.js';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'ispace-storage-'));
@@ -131,5 +132,59 @@ describe('解压限额默认值', () => {
   it('单包上限低于用户空间配额——单个包不应接近整个配额', () => {
     expect(DEFAULT_EXTRACT_LIMITS.maxTotalBytes).toBeLessThan(500 * 1024 * 1024);
     expect(DEFAULT_EXTRACT_LIMITS.maxEntries).toBeGreaterThan(1000);
+  });
+});
+
+describe('extractCover', () => {
+  const base = '/zhangming/zhoubao/';
+
+  it('og:image 相对地址挂到站点子路径下', () => {
+    const html = '<head><meta property="og:image" content="./cover.png"></head>';
+    expect(extractCover(html, [], base)).toBe('/zhangming/zhoubao/cover.png');
+  });
+
+  it('og:image 绝对地址原样用', () => {
+    const html = '<meta property="og:image" content="https://cdn.example.com/a.jpg">';
+    expect(extractCover(html, [], base)).toBe('https://cdn.example.com/a.jpg');
+  });
+
+  it('content 在 property 之前也能取到（属性顺序不定）', () => {
+    const html = '<meta content="/pic.webp" property="og:image">';
+    expect(extractCover(html, [], base)).toBe('/zhangming/zhoubao/pic.webp');
+  });
+
+  it('没有 meta 时回落到根目录的 cover.png', () => {
+    expect(extractCover('<h1>hi</h1>', ['index.html', 'cover.png', 'app.js'], base))
+      .toBe('/zhangming/zhoubao/cover.png');
+  });
+
+  it('meta 优先于 cover.png', () => {
+    const html = '<meta property="og:image" content="hero.jpg">';
+    expect(extractCover(html, ['cover.png'], base)).toBe('/zhangming/zhoubao/hero.jpg');
+  });
+
+  it('子目录里的 cover.png 不算——只认产物根', () => {
+    expect(extractCover('', ['assets/cover.png'], base)).toBeNull();
+  });
+
+  it('javascript: / data: 一律拒绝，宁可没有封面也不进 img src', () => {
+    expect(extractCover('<meta property="og:image" content="javascript:alert(1)">', [], base)).toBeNull();
+    expect(extractCover('<meta property="og:image" content="data:image/png;base64,AAAA">', [], base)).toBeNull();
+  });
+
+  it('协议相对 //evil.com 也拒绝——它会跑到外站', () => {
+    expect(extractCover('<meta property="og:image" content="//evil.com/x.png">', [], base)).toBeNull();
+  });
+
+  it('name="cover" 是 og:image 之外的第二种写法', () => {
+    expect(extractCover('<meta name="cover" content="/c.jpg">', [], base)).toBe('/zhangming/zhoubao/c.jpg');
+  });
+
+  it('什么都没有时返回 null，卡片回落字母块', () => {
+    expect(extractCover('<html></html>', ['index.html'], base)).toBeNull();
+  });
+
+  it('siteBase 少尾斜杠也能补上', () => {
+    expect(extractCover('', ['cover.png'], '/a/b')).toBe('/a/b/cover.png');
   });
 });

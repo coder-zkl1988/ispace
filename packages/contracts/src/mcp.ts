@@ -255,7 +255,10 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     + '用户说"我那个页面怎么打不开"时先查它。',
 
   deploy:
-    '把前端构建产物部署到当前用户的空间。发布前自动扫描硬编码密钥，命中即阻断。部署成功后返回可访问的 URL。',
+    '把前端构建产物部署到当前用户的空间。发布前自动扫描硬编码密钥，命中即阻断。部署成功后返回可访问的 URL。'
+    + '想让页面在卡片上有封面图：在 index.html 里加 '
+    + '<meta property="og:image" content="./cover.png">，或在产物根目录放一张 '
+    + 'cover.png/.jpg/.webp。没有则卡片显示首字母。',
   rollback: '把某个已部署的应用回滚到历史版本。回滚是软链切换，秒级生效。',
   releases: '列出某个应用的历史版本，含版本号、发布时间、发布入口与大小。',
   provision: '开通一位新员工：建静态目录、建独立数据 schema、登记用户路径与配额。仅管理员可用。',

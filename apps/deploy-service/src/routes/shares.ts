@@ -32,7 +32,7 @@ export function registerShareRoutes(
     const me = await requireAuth(req);
     const rows = await sql`
       SELECT s.id, s.app_id, s.status, s.created_at,
-             a.id AS a_id, a.owner_id, a.slug, a.name, a.description, a.icon_letter,
+             a.id AS a_id, a.owner_id, a.slug, a.name, a.description, a.icon_letter, a.cover_path,
              a.type, a.status AS a_status, a.current_release_id, a.group_id,
              a.sort_order, a.visibility, a.size_bytes, a.last_accessed_at,
              a.created_at AS a_created, a.updated_at AS a_updated,
@@ -52,7 +52,8 @@ export function registerShareRoutes(
         createdAt: r.created_at,
         app: {
           id: r.a_id, ownerId: r.owner_id, slug: r.slug, name: r.name,
-          description: r.description, iconLetter: r.icon_letter, type: r.type,
+          description: r.description, iconLetter: r.icon_letter,
+          coverUrl: r.cover_path ?? null, type: r.type,
           status: r.a_status, currentReleaseId: r.current_release_id,
           groupId: r.group_id, sortOrder: r.sort_order, visibility: r.visibility,
           sizeBytes: Number(r.size_bytes), lastAccessedAt: r.last_accessed_at,
