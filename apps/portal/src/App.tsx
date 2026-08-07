@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { App as AppEntity, AppGroup } from '@ispace/contracts';
+import { MARKETPLACE_CATEGORIES, type App as AppEntity, type AppGroup } from '@ispace/contracts';
 import {
   AppIcon, Avatar, AvatarMenu, Badge, Button, Card, CoverBanner, Dialog, fmtBytes, fmtDate,
   GlobalKeyframes, Greeting, Icon, Input, SectionLabel, ShareDialog, StatusDot,
-  QrCode, Tabs, Toast, ToneProvider, copyText, useCopy, type ShareVisibility,
+  QrCode, Select, Tabs, Toast, ToneProvider, copyText, useCopy, type ShareVisibility,
 } from '@ispace/ui';
 import {
   api, ownerFromPath,
@@ -1005,6 +1005,9 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
   /** 正在看提示词的那条 listing。null 表示弹窗关着。 */
   const [remix, setRemix] = useState<Listing | null>(null);
   const [msg, setMsg] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
+  /** 选中的分类，null=全部。本地搜索词。数据量是一个公司的共享页面，客户端过滤足够。 */
+  const [cat, setCat] = useState<string | null>(null);
+  const [q, setQ] = useState('');
 
   const load = () => void api.marketplace()
     .then((r) => setListings(r.listings))
@@ -1057,6 +1060,17 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
     );
   }
 
+  // 各分类的条数；侧边栏只列有内容的分类，空的不摆。
+  const counts = new Map<string, number>();
+  for (const l of listings) counts.set(l.category, (counts.get(l.category) ?? 0) + 1);
+  const cats = MARKETPLACE_CATEGORIES.filter((cName) => counts.has(cName));
+
+  const kw = q.trim().toLowerCase();
+  const visible = listings.filter((l) =>
+    (cat === null || l.category === cat)
+    && (!kw || `${l.name} ${l.description ?? ''} ${l.owner_name}`.toLowerCase().includes(kw)),
+  );
+
   return (
     <>
       <div style={{ marginBottom: 'var(--space-12)' }}>
@@ -1069,8 +1083,33 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gap: 'var(--space-8)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-        {listings.map((l) => (
+      <div style={{ display: 'flex', gap: 'var(--space-16)', alignItems: 'flex-start' }}>
+        {/* 侧边栏：分类。sticky 让它在长列表滚动时留在视野里 */}
+        <aside style={{ width: 168, flex: 'none', position: 'sticky', top: 72 }}>
+          <SectionLabel>分类</SectionLabel>
+          <div style={{ display: 'grid', gap: 2, marginTop: 'var(--space-6)' }}>
+            <CatItem label="全部" count={listings.length} on={cat === null} onClick={() => setCat(null)} />
+            {cats.map((cName) => (
+              <CatItem key={cName} label={cName} count={counts.get(cName) ?? 0}
+                on={cat === cName} onClick={() => setCat(cName)} />
+            ))}
+          </div>
+        </aside>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* 搜索：本地过滤，按名称/简介/作者。市场不大，不必走服务端 */}
+          <div style={{ position: 'relative', marginBottom: 'var(--space-10)', maxWidth: 360 }}>
+            <Input value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="搜索页面、简介或作者" />
+          </div>
+
+          {visible.length === 0 ? (
+            <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-base)' }}>
+              {kw ? `没有匹配「${q}」的页面` : '这个分类下还没有页面'}
+            </p>
+          ) : (
+          <div style={{ display: 'grid', gap: 'var(--space-8)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+        {visible.map((l) => (
           <Card key={l.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
             {l.cover_path && <CoverBanner src={l.cover_path} alt={l.name} />}
             <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
@@ -1093,7 +1132,15 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
             )}
             <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-5)' }}>
               {l.mine ? (
-                <Badge tone="brand">你发布的</Badge>
+                <>
+                  <Badge tone="brand">你发布的</Badge>
+                  {/* 作者就地归类：改完立刻反映到侧边栏。别人的卡片不显示这个 */}
+                  <Select
+                    value={l.category}
+                    onChange={(v) => void api.setListingCategory(l.app_id, v).then(load)}
+                    items={MARKETPLACE_CATEGORIES.map((cName) => ({ value: cName, label: cName }))}
+                  />
+                </>
               ) : (
                 <Button size="sm" variant={l.installed ? 'ghost' : 'primary'}
                   disabled={busy === l.app_id} onClick={() => void toggle(l)}>
@@ -1121,6 +1168,9 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
             </div>
           </Card>
         ))}
+          </div>
+          )}
+        </div>
       </div>
 
       {remix && (
@@ -1132,6 +1182,29 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
       )}
       {msg && <Toast message={msg.text} tone={msg.tone} onClose={() => setMsg(null)} />}
     </>
+  );
+}
+
+/** 侧边栏的一个分类项：名字 + 条数，选中高亮。 */
+function CatItem({ label, count, on, onClick }: {
+  label: string; count: number; on: boolean; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      width: '100%', padding: 'var(--space-3) var(--space-6)', border: 'none',
+      borderRadius: 'var(--radius-8)', cursor: 'pointer', textAlign: 'left',
+      background: on ? 'var(--accent-subtle)' : 'transparent',
+      color: on ? 'var(--text-heading)' : 'var(--text-secondary)',
+      fontSize: 'var(--text-base)', fontWeight: on ? 'var(--weight-semibold)' : 'var(--weight-regular)',
+      transition: 'var(--transition-colors)',
+    }}
+      onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'var(--surface-2)'; }}
+      onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}
+    >
+      <span>{label}</span>
+      <span className="num" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>{count}</span>
+    </button>
   );
 }
 

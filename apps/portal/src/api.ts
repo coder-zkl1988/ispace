@@ -96,6 +96,7 @@ export interface Listing {
   type: string; status: string;
   owner_username: string; owner_name: string;
   installed: boolean; mine: boolean;
+  category: string;
   /**
    * 做出这个页面的那段提示词（apps.source_prompt）。
    *
@@ -197,7 +198,10 @@ export const api = {
   uninstallFromMarket: (appId: string) =>
     fetch(`/deploy/api/marketplace/${appId}/install`, { method: 'DELETE', credentials: 'same-origin' })
       .then((r) => r.json() as Promise<{ ok: boolean }>),
-  publishToMarket: (appId: string) => post<{ listing: unknown }>('/marketplace', { appId }),
+  publishToMarket: (appId: string, category?: string) =>
+    post<{ listing: unknown }>('/marketplace', category ? { appId, category } : { appId }),
+  setListingCategory: (appId: string, category: string) =>
+    patch<{ ok: boolean }>(`/marketplace/${appId}/category`, { category }),
   unpublishFromMarket: (appId: string) =>
     fetch(`/deploy/api/marketplace/${appId}`, { method: 'DELETE', credentials: 'same-origin' })
       .then((r) => r.json() as Promise<{ ok: boolean }>),

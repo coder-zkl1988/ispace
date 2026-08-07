@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { API_BASE, ERROR_CODES, IspaceError, type User } from '@ispace/contracts';
+import {
+  API_BASE, ERROR_CODES, IspaceError, marketplaceCategorySchema, type User,
+} from '@ispace/contracts';
 import { getPlatformPolicy, writeAudit, type Sql } from '@ispace/db';
 import { z } from 'zod';
 
@@ -17,7 +19,7 @@ import { z } from 'zod';
  * 也跟着回」是同一套语义。
  */
 
-const publishSchema = z.object({ appId: z.string().uuid() });
+const publishSchema = z.object({ appId: z.string().uuid(), category: marketplaceCategorySchema.optional() });
 
 export function registerMarketplaceRoutes(
   app: FastifyInstance,
@@ -29,7 +31,7 @@ export function registerMarketplaceRoutes(
   app.get(`${API_BASE}/marketplace`, async (req) => {
     const me = await requireAuth(req);
     const rows = await sql`
-      SELECT m.id, m.app_id, m.published_at, m.install_count,
+      SELECT m.id, m.app_id, m.published_at, m.install_count, m.category,
              a.slug, a.name, a.description, a.icon_letter, a.cover_path, a.type, a.status,
              a.source_prompt,
              u.username AS owner_username, u.display_name AS owner_name,
@@ -50,7 +52,7 @@ export function registerMarketplaceRoutes(
   // ── 上架 ──────────────────────────────────────────────────────────
   app.post(`${API_BASE}/marketplace`, async (req) => {
     const me = await requireAuth(req);
-    const { appId } = publishSchema.parse(req.body);
+    const { appId, category } = publishSchema.parse(req.body);
 
     const { allowPublicShare } = await getPlatformPolicy(sql);
     if (!allowPublicShare) {
@@ -64,9 +66,11 @@ export function registerMarketplaceRoutes(
 
     // 幂等：重复上架不报错，只刷新时间
     const rows = await sql`
-      INSERT INTO ispace.marketplace_listings (app_id, published_by)
-      VALUES (${appId}, ${me.id})
-      ON CONFLICT (app_id) DO UPDATE SET published_at = now()
+      INSERT INTO ispace.marketplace_listings (app_id, published_by, category)
+      VALUES (${appId}, ${me.id}, ${category ?? '其他'})
+      ON CONFLICT (app_id) DO UPDATE SET
+        published_at = now(),
+        category = COALESCE(${category ?? null}, ispace.marketplace_listings.category)
       RETURNING *
     `;
     await sql`UPDATE ispace.apps SET visibility = 'public' WHERE id = ${appId}`;
@@ -76,6 +80,17 @@ export function registerMarketplaceRoutes(
       ip: req.ip,
     });
     return { listing: rows[0] };
+  });
+
+  // ── 改分类 ────────────────────────────────────────────────────────
+  app.patch(`${API_BASE}/marketplace/:appId/category`, async (req) => {
+    const me = await requireAuth(req);
+    const { appId } = req.params as { appId: string };
+    const { category } = z.object({ category: marketplaceCategorySchema }).parse(req.body);
+    const owned = await sql`SELECT 1 FROM ispace.apps WHERE id = ${appId} AND owner_id = ${me.id}`;
+    if (!owned[0]) throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能改自己上架的页面。');
+    await sql`UPDATE ispace.marketplace_listings SET category = ${category} WHERE app_id = ${appId}`;
+    return { ok: true };
   });
 
   // ── 下架 ──────────────────────────────────────────────────────────

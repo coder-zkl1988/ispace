@@ -67,6 +67,17 @@ export const appStatusSchema = z.enum(['running', 'building', 'stopped']);
  */
 export const appVisibilitySchema = z.enum(['private', 'shared', 'public']);
 
+/**
+ * 创意市场的分类。固定一小组、三端共用——分类的价值在「大家用同一套词」，
+ * 让它可自由填就退化成一堆近义词（"工具/小工具/效率"），侧边栏就没法聚合了。
+ * 默认「其他」：没归类的页面照样上架，只是先落在这一格，作者可随时改。
+ */
+export const MARKETPLACE_CATEGORIES = [
+  '效率工具', '数据看板', '表单问卷', '游戏娱乐', '官网展示', '生活服务', '其他',
+] as const;
+export type MarketplaceCategory = (typeof MARKETPLACE_CATEGORIES)[number];
+export const marketplaceCategorySchema = z.enum(MARKETPLACE_CATEGORIES);
+
 export const appSchema = z.object({
   id,
   ownerId: id,
