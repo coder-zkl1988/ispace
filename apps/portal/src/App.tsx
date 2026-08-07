@@ -796,7 +796,9 @@ function AppCard({
             fontSize: 'var(--text-sm)', color: 'var(--link)',
           }}
         >{c('action.share')}</button>
-        <a href={`/console#/apps/${app.slug}`} style={{
+        {/* 去控制台的「我的页面」tab。原先指 #/apps/{slug}，那不是合法的
+            screen key，控制台会落到默认屏——点「管理」却到了别处。 */}
+        <a href="/console#/pages" style={{
           fontSize: 'var(--text-sm)', color: 'var(--link)', textDecoration: 'none',
         }}>{c('action.manage')}</a>
       </div>

@@ -151,7 +151,10 @@ export function App() {
           <main style={{
             flex: 1, minWidth: 0, margin: '0 auto',
             padding: 'var(--space-16) var(--space-16) var(--space-24)',
-            maxWidth: 1180, width: '100%',
+            // 1180 太窄：宽屏上两侧留出大片空白，数据密的表格却已经在滚动。
+            // 提到 1440 把那片空间让给内容，表格少滚甚至不滚；再宽就不放了，
+            // 免得正文一行拉得太长反而难读。
+            maxWidth: 1440, width: '100%',
           }}>
             <Screens screen={screen} me={me} />
           </main>

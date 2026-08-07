@@ -775,6 +775,13 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
     return { release, url: deployService.appUrl(user.username, slug) };
   });
 
+  // 给存量页面补封面：封面功能之前发布的页面 cover_path 是 null，产物还在磁盘上，
+  // 可就地回填，不必让用户重发。管理员在控制台触发，可重复跑。
+  app.post(`${API_BASE}/admin/covers/backfill`, async (req) => {
+    await requireAdmin(req);
+    return deployService.backfillCovers();
+  });
+
   /**
    * 删除页面。
    *

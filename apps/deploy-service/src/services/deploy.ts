@@ -279,6 +279,59 @@ export class DeployService {
   }
 
   /**
+   * 给存量页面补封面。
+   *
+   * 封面是后来才加的功能，在那之前发布的页面 cover_path 一直是 null。但它们的
+   * 产物还在磁盘上（/srv/releases/{user}/{app}/{当前版本}），所以能就地回填，
+   * 不必让用户重新发一遍——那对非技术用户就是一道坎。
+   *
+   * 每个页面走一遍和发布时同样的判断：先看它有没有声明封面（有些老页面本就
+   * 写了 og:image），没有再自动截一张。只处理 cover_path 仍为 null 的，已有
+   * 封面的不动。全程 best-effort，单个失败不影响其余。
+   *
+   * 由管理员在控制台触发；也可重复跑（上次截图失败的这次再试）。
+   */
+  async backfillCovers(): Promise<{ scanned: number; filled: number }> {
+    const { readdirSync } = await import('node:fs');
+    const rows = await this.sql<
+      { id: string; slug: string; username: string; stamp: string }[]
+    >`
+      SELECT a.id, a.slug, u.username, r.path AS stamp
+        FROM ispace.apps a
+        JOIN ispace.users u    ON u.id = a.owner_id
+        JOIN ispace.releases r ON r.id = a.current_release_id
+       WHERE a.cover_path IS NULL AND a.status = 'running'
+       ORDER BY a.updated_at DESC
+    `;
+    let filled = 0;
+    for (const row of rows) {
+      try {
+        const dir = releaseDir(this.storage, row.username, row.slug, row.stamp);
+        const indexPath = join(dir, 'index.html');
+        if (!existsSync(indexPath)) continue;
+        const html = await readFile(indexPath, 'utf8');
+        const base = `/${row.username}/${row.slug}/`;
+        let cover = extractCover(html, readdirSync(dir), base);
+        if (!cover && coverShotAvailable()) {
+          const ok = await screenshotCover(indexPath, join(dir, AUTO_COVER_FILE));
+          if (ok) cover = `${base}${AUTO_COVER_FILE}`;
+        }
+        if (cover) {
+          // 只在仍为 null 时落：跑的过程中用户可能正好重新发布并声明了封面
+          await this.sql`
+            UPDATE ispace.apps SET cover_path = ${cover}
+             WHERE id = ${row.id} AND cover_path IS NULL
+          `;
+          filled += 1;
+        }
+      } catch {
+        // 单个页面读不了/截不了就跳过，不拖累整批
+      }
+    }
+    return { scanned: rows.length, filled };
+  }
+
+  /**
    * 按某个 release 目录里实际存在的文件，重算并落库 cover_path。
    *
    * 用在回滚：优先该版本声明的封面（读它自己的 index.html），其次那版当时
