@@ -41,6 +41,14 @@ RUN apk add --no-cache tini curl \
  && chmod +x /usr/local/bin/gitleaks \
  && gitleaks version
 
+# chromium：给没声明封面的页面自动截一张封面（services/cover-shot.ts）。
+# 只装系统 chromium + 它的运行时依赖，不走 puppeteer 那套下载。
+# font-wqy-zenhei：中文字体。页面几乎全是中文，不装就截出一屏豆腐块方框。
+# 这是本镜像里最重的一块，仅为「封面兜底」而在——A 的声明式封面不需要它。
+RUN apk add --no-cache chromium font-wqy-zenhei \
+ && chromium-browser --version
+ENV ISPACE_CHROMIUM_PATH=/usr/bin/chromium-browser
+
 WORKDIR /app
 COPY --from=builder /out/node_modules ./node_modules
 COPY --from=builder /out/dist ./dist

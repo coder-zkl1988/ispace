@@ -38,6 +38,7 @@ import {
   type StorageConfig,
 } from '@ispace/storage';
 import { assertScanClean, checkBasePath, gitleaksScan, scanFiles } from '@ispace/scanner';
+import { coverShotAvailable, screenshotCover } from './cover-shot.js';
 
 /**
  * 发布链路（技术方案 §4.5、规格 §9）。
@@ -51,6 +52,9 @@ import { assertScanClean, checkBasePath, gitleaksScan, scanFiles } from '@ispace
 
 /** 保留的历史版本数。超出的自动清理，防止 releases 目录吃满磁盘。 */
 const KEEP_RELEASES = 10;
+
+/** 自动截图落地的文件名。前缀 __ispace 避免撞用户产物里的同名文件。 */
+const AUTO_COVER_FILE = '__ispace_cover.png';
 
 export interface DeployInput {
   user: User;
@@ -180,6 +184,24 @@ export class DeployService {
       const cover = extractCover(html, rootFiles, `/${user.username}/${slug}/`);
       await this.sql`UPDATE ispace.apps SET cover_path = ${cover} WHERE id = ${app.id}`;
 
+      // 没声明封面 → 后台自动截一张兜底（方案 B）。**不 await**：截图要几秒、
+      // 且是锦上添花，不该让发布响应等它。截好后单独回写 cover_path，下次卡片
+      // 刷新就有图；失败则维持 null，卡片回落字母块。
+      if (!cover && coverShotAvailable()) {
+        const outPng = join(dest, AUTO_COVER_FILE);
+        void screenshotCover(join(dest, 'index.html'), outPng)
+          .then(async (ok) => {
+            if (!ok) return;
+            // 回写前再确认没有新版本抢先声明了封面：并发发布时后完成的截图
+            // 不该盖掉更晚那次的声明。只在仍为 null 时落。
+            await this.sql`
+              UPDATE ispace.apps SET cover_path = ${`/${user.username}/${slug}/${AUTO_COVER_FILE}`}
+               WHERE id = ${app.id} AND cover_path IS NULL
+            `;
+          })
+          .catch(() => { /* best-effort，吞掉 */ });
+      }
+
       await refreshStorageUsage(this.sql, user.id);
       await pruneReleases(this.storage, user.username, slug, KEEP_RELEASES, stamp);
       await writeAudit(this.sql, {
@@ -242,12 +264,43 @@ export class DeployService {
     await switchSymlink(siteLink(this.storage, user.username, slug), targetDir);
     const release = await activateRelease(this.sql, app.id, target.version);
 
+    // 封面按回滚到的那个版本重算——cover_path 是应用级的，不跟着软链走。
+    // 不重算的话，回滚到一个更旧、当时没截图/没声明封面的版本后，卡片仍挂着
+    // 现已切走的那版的封面路径，指向一个 404。读目标目录里实际有什么：
+    // 声明的 og:image/cover.* 优先，其次那版当时自动截的 __ispace_cover.png。
+    await this.recomputeCover(app.id, user.username, slug, targetDir);
+
     await writeAudit(this.sql, {
       actorId: user.id, action: 'app.rollback', targetType: 'app', targetId: app.id,
       source: 'console', result: 'success', metadata: { slug, toVersion: target.version },
       ip: clientIp ?? null,
     });
     return release;
+  }
+
+  /**
+   * 按某个 release 目录里实际存在的文件，重算并落库 cover_path。
+   *
+   * 用在回滚：优先该版本声明的封面（读它自己的 index.html），其次那版当时
+   * 自动截的 __ispace_cover.png，都没有就置 null 回落字母块。只读磁盘、不再
+   * 截图——回滚要秒级生效，不该等一个可能几秒的 chromium。
+   */
+  private async recomputeCover(
+    appId: string, username: string, slug: string, dir: string,
+  ): Promise<void> {
+    const { readdirSync } = await import('node:fs');
+    let cover: string | null = null;
+    try {
+      const html = await readFile(join(dir, 'index.html'), 'utf8');
+      const rootFiles = readdirSync(dir);
+      cover = extractCover(html, rootFiles, `/${username}/${slug}/`);
+      if (!cover && rootFiles.includes(AUTO_COVER_FILE)) {
+        cover = `/${username}/${slug}/${AUTO_COVER_FILE}`;
+      }
+    } catch {
+      cover = null; // 读不到就干净地回落，不让回滚因为封面失败
+    }
+    await this.sql`UPDATE ispace.apps SET cover_path = ${cover} WHERE id = ${appId}`;
   }
 }
 
