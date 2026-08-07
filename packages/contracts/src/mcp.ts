@@ -119,6 +119,11 @@ export const mcpCreateBackendInput = z.object({
     '可选备注：主要给哪个页面用。**不填是常态**——后端属于用户不属于页面，'
     + '该用户的所有页面都能调它（同域名同源，不用配 CORS）',
   ),
+  exposed: z.boolean().default(false).describe(
+    '这个后端本身带前台页面、要作为一个应用露出到用户空间（能在「我的页面」'
+    + '看到、可分享）吗？true=全栈项目；false（默认）=纯 API 服务，只给这个人'
+    + '自己的页面提供数据，不在空间露出。拿不准就 false——纯 API 是常态。',
+  ),
 });
 
 export const mcpQuotaInput = z.object({});
@@ -267,7 +272,9 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     + '每人默认上限 2 个，单个 0.5 vCPU / 512 MB。'
     + '**先看 list-backends**：后端属于用户不属于页面，已有的那个就能给新页面用——'
     + '它的地址与用户所有页面同域名同源，直接 fetch 即可，不用配 CORS，也不用再建一个。'
-    + '另外，只是要存数据的话不需要后端，用 data-connection 那条路，不占这个配额。',
+    + '另外，只是要存数据的话不需要后端，用 data-connection 那条路，不占这个配额。'
+    + '带前台页面、要作为应用露出到用户空间的全栈项目，建时置 exposed=true；'
+    + '纯给自己页面供 API 的服务保持默认（不露出）。',
   'delete-app':
     '删除一个页面及其全部历史版本，不可恢复。只有用户明确要求删除时才调用；'
     + '"清理一下"这类模糊说法要先问清楚删哪个。',

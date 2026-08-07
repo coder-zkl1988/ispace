@@ -308,8 +308,8 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
       case 'create-backend': {
         // 与 REST 走同一个服务层（services/backend.ts）。两处各写一份的话，
         // 「先落库再调编排器」这类次序要求迟早会在一边漂掉。
-        const { name: bname, sourceRepo, port, site } = args as
-          { name: string; sourceRepo: string; port?: number; site?: string };
+        const { name: bname, sourceRepo, port, site, exposed } = args as
+          { name: string; sourceRepo: string; port?: number; site?: string; exposed?: boolean };
         const out = await createBackend(
           {
             sql,
@@ -317,13 +317,14 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
             publicHost: new URL(d.publicBase).host,
             urlPathFor: backendUrlPath,
           },
-          { user, name: bname, sourceRepo, port, appSlug: site, source: 'mcp', clientIp },
+          { user, name: bname, sourceRepo, port, appSlug: site, exposed, source: 'mcp', clientIp },
         );
         return [
           `已创建后端 ${out.backend.name}`,
           `访问地址：${out.url}`,
           `限额：${out.backend.cpuLimit} vCPU / ${out.backend.memLimitMb} MB（平台强制写入）`,
           site ? `已关联到页面 /${site}` : '',
+          exposed ? '已作为全栈应用露出到「我的页面」，可分享。' : '（纯 API 服务，不在空间露出——要露出改 exposed=true）',
           '',
           '状态是 creating，拉镜像并启动通常一两分钟。用 list-backends 查是否就绪。',
           '若一直起不来，多半是端口填错了（要填容器内实际监听的那个）或源拉不下来。',

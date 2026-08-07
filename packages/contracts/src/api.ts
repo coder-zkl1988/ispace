@@ -128,6 +128,14 @@ export const createBackendRequestSchema = z.object({
    * 那是最难自己想明白的一种坏法。
    */
   port: z.number().int().min(1).max(65535).default(3000),
+  /** 全栈项目（带前台、要露出到空间）置 true；纯 API 服务默认 false。 */
+  exposed: z.boolean().default(false),
+});
+
+/** 改后端的露出/可见性。只这两项可改，别的（源、端口）走重建。 */
+export const updateBackendSchema = z.object({
+  exposed: z.boolean().optional(),
+  visibility: z.enum(['private', 'shared', 'public']).optional(),
 });
 
 export const backendListResponseSchema = z.object({

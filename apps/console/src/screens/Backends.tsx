@@ -119,7 +119,7 @@ export function Backends({ me }: { me: Me }) {
             <table style={{ width: '100%', minWidth: 'max-content', borderCollapse: 'collapse', fontSize: 'var(--text-base)' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
-                  {['应用', '访问地址', '来源', '限额', '状态', '创建时间', ''].map((h) => (
+                  {['应用', '访问地址', '来源', '限额', '状态', '露出', '创建时间', ''].map((h) => (
                     <th key={h} style={{
                       padding: 'var(--space-5) var(--space-8)', fontSize: 'var(--text-xs)',
                       fontWeight: 'var(--weight-semibold)', color: 'var(--text-tertiary)',
@@ -142,6 +142,23 @@ export function Backends({ me }: { me: Me }) {
                           : b.status === 'creating' ? c('status.building')
                           : b.status === 'stopped' ? c('status.stopped') : '失败'}
                       />
+                    </td>
+                    <td style={{ padding: 'var(--space-5) var(--space-8)', whiteSpace: 'nowrap' }}>
+                      {b.exposed ? (
+                        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                          <Badge tone={b.visibility === 'public' ? 'success' : 'brand'}>
+                            {b.visibility === 'public' ? '全公司' : b.visibility === 'shared' ? '指定同事' : '仅自己'}
+                          </Badge>
+                          <Button size="sm" variant="ghost" disabled={busy}
+                            onClick={() => void act(() => api.updateBackend(b.id, { exposed: false }), `已从空间收回「${b.name}」`)}>收回</Button>
+                        </span>
+                      ) : (
+                        <Button size="sm" variant="ghost" disabled={busy}
+                          onClick={() => void act(
+                            () => api.updateBackend(b.id, { exposed: true, visibility: 'public' }),
+                            `「${b.name}」已作为应用露出到「我的页面」，全公司可访问`,
+                          )}>露出到空间</Button>
+                      )}
                     </td>
                     <td className="num" style={{ padding: 'var(--space-5) var(--space-8)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{fmtDate(b.createdAt)}</td>
                     <td style={{ padding: 'var(--space-5) var(--space-8)', whiteSpace: 'nowrap' }}>

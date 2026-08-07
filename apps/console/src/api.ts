@@ -61,6 +61,7 @@ export interface Backend {
   sourceRepo: string | null; cpuLimit: number; memLimitMb: number;
   status: 'creating' | 'running' | 'stopped' | 'failed';
   urlPath: string; orchestratorRef: string | null; createdAt: string;
+  port: number; exposed: boolean; visibility: 'private' | 'shared' | 'public';
   /** 服务于哪个页面。null = 没关联。 */
   appSlug?: string | null;
 }
@@ -391,6 +392,8 @@ export const api = {
     limits: { cpu: number; memoryMb: number; count: number };
     orchestrator: string;
   }>('/backends'),
+  updateBackend: (id: string, body: { exposed?: boolean; visibility?: 'private' | 'shared' | 'public' }) =>
+    req<{ backend: Backend }>(`/backends/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   createBackend: (name: string, sourceRepo: string, port = 3000, appSlug?: string) =>
     req<{ backend: Backend; url: string }>('/backends', {
       method: 'POST', body: JSON.stringify({ name, sourceRepo, port, appSlug }),

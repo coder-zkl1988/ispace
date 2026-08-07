@@ -181,6 +181,12 @@ export const backendSchema = z.object({
   status: backendStatusSchema,
   /** 形如 /svc/{user}/{app}。 */
   urlPath: z.string().min(1),
+  /** 容器内监听端口，鉴权代理据此连容器。 */
+  port: z.number().int().positive(),
+  /** 是否作为应用露出到「我的空间」。false=纯 API 服务，只对控制台与 AI 可见。 */
+  exposed: z.boolean(),
+  /** 露出后的访问范围，与页面同义。 */
+  visibility: appVisibilitySchema,
   /** 编排器侧的应用标识（Dokploy applicationId）。 */
   orchestratorRef: z.string().nullable(),
   createdAt: ts,

@@ -8,7 +8,7 @@ import {
 import {
   api, ownerFromPath,
   type ApkRelease, type InstalledApp, type Listing, type MeResponse,
-  type PendingShare, type AuthPolicy, type SharePeerInfo,
+  type PendingShare, type AuthPolicy, type SharePeerInfo, type ExposedBackend,
 } from './api';
 
 /**
@@ -63,17 +63,20 @@ function Space() {
     与 apps 分开存——它们不属于我，不能改不能分享，只能打开和移除。
   */
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
+  const [backends, setBackends] = useState<ExposedBackend[]>([]);
   const [tab, setTab] = useState<TabKey>('pages');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const owner = ownerFromPath();
 
   const reloadApps = useCallback(async () => {
-    const [a, i] = await Promise.all([
+    const [a, i, be] = await Promise.all([
       api.apps().catch(() => null),
       api.installed().catch(() => null),
+      api.backends().catch(() => null),
     ]);
     if (i) setInstalled(i.installed);
+    if (be) setBackends(be.backends.filter((b) => b.exposed));
     if (!a) return;
     setApps(a.apps);
     setGroups(a.groups);
@@ -113,15 +116,17 @@ function Space() {
           location.replace(`/${m.user.username}/`);
           return;
         }
-        const [a, s, i] = await Promise.all([
+        const [a, s, i, be] = await Promise.all([
           api.apps(),
           api.pendingShares().catch(() => ({ shares: [] })),
           api.installed().catch(() => ({ installed: [] })),
+          api.backends().catch(() => ({ backends: [] as ExposedBackend[] })),
         ]);
         setApps(a.apps);
         setGroups(a.groups);
         setShares(s.shares);
         setInstalled(i.installed);
+        setBackends(be.backends.filter((b) => b.exposed));
       } catch {
         setMe(null);
       } finally {
@@ -150,6 +155,7 @@ function Space() {
             apps={apps}
             groups={groups}
             installed={installed}
+            backends={backends}
             shares={shares}
             q={q}
             onShareResponded={(id) => setShares((prev) => prev.filter((s) => s.id !== id))}
@@ -544,10 +550,11 @@ function fmtLocalTime(iso: string): string {
 
 // ── 我的页面 ──────────────────────────────────────────────────────────
 function MyPages({
-  me, owner, apps, groups, installed, shares, q, onShareResponded, reloadApps,
+  me, owner, apps, groups, installed, backends, shares, q, onShareResponded, reloadApps,
 }: {
   me: MeResponse; owner: string; apps: AppEntity[]; groups: AppGroup[];
   installed: InstalledApp[];
+  backends: ExposedBackend[];
   shares: PendingShare[]; q: string; onShareResponded: (id: string) => void;
   reloadApps: () => Promise<void>;
 }) {
@@ -615,6 +622,9 @@ function MyPages({
         </>
       )}
 
+      {isOwner && backends.length > 0 && (
+        <BackendSection items={backends} owner={owner} />
+      )}
       {isOwner && filteredInstalled.length > 0 && (
         <InstalledSection items={filteredInstalled} onRemoved={reloadApps} />
       )}
@@ -672,6 +682,58 @@ function Section({
  * 删不掉（只能从自己这儿移除）。混在一起会让人以为「删除」会删掉别人
  * 的东西。归属写在卡片上，点开去的也是对方空间下的地址。
  */
+/**
+ * 露出的后端应用（全栈项目）。
+ *
+ * 与静态页面同处一屏但单列一节：它们是活着的容器、不是文件，能开能停，
+ * 访问地址是 /svc/{user}/{name}/ 而非 /{user}/{app}/。混进上面的卡片墙会
+ * 让人以为能像页面那样回滚、看版本——那些对后端不成立。
+ */
+function BackendSection({ items, owner }: { items: ExposedBackend[]; owner: string }) {
+  const c = useCopy();
+  return (
+    <section style={{ marginBottom: 'var(--space-16)' }}>
+      <div style={{ marginBottom: 'var(--space-8)' }}>
+        <SectionLabel>应用（后端）</SectionLabel>
+      </div>
+      <div style={{
+        display: 'grid', gap: 'var(--space-8)',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+      }}>
+        {items.map((b) => {
+          const url = `/svc/${owner}/${b.name}/`;
+          const running = b.status === 'running';
+          return (
+            <Card key={b.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
+                <AppIcon letter={b.name.slice(0, 1)} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <a href={url} style={{
+                    display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
+                    font: 'var(--weight-semibold) var(--text-card-title)/1.3 var(--font-sans)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{b.name}</a>
+                  <div className="mono" style={{
+                    fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{location.host}{url}</div>
+                </div>
+                <Badge tone={b.visibility === 'public' ? 'success' : 'brand'}>
+                  {b.visibility === 'public' ? '全公司' : b.visibility === 'shared' ? '指定同事' : '仅自己'}
+                </Badge>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)', marginTop: 'auto' }}>
+                <StatusDot status={running ? 'running' : 'stopped'}
+                  label={running ? c('status.running') : c('status.stopped')} />
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function InstalledSection({
   items, onRemoved,
 }: { items: InstalledApp[]; onRemoved: () => Promise<void> }) {

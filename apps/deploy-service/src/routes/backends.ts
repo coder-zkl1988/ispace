@@ -5,6 +5,7 @@ import {
 } from '@ispace/contracts';
 import { getPlatformPolicy, getQuota, writeAudit, type Sql } from '@ispace/db';
 import { createBackend, toBackend } from '../services/backend.js';
+import { updateBackendSchema } from '@ispace/contracts';
 import { backendUrlPath, type Orchestrator } from '@ispace/orchestrator';
 
 /**
@@ -92,10 +93,35 @@ export function registerBackendRoutes(
       { sql, orchestrator, publicHost, urlPathFor: backendUrlPath },
       {
         user: me, name: input.name, sourceRepo: input.sourceRepo,
-        port: input.port, appSlug: input.appSlug,
+        port: input.port, appSlug: input.appSlug, exposed: input.exposed,
         source: 'console', clientIp: req.ip,
       },
     );
+  });
+
+  // ── 改露出 / 可见性 ────────────────────────────────────────────────
+  // 把一个纯 API 服务提成露出的全栈应用，或调它给谁可见。源和端口不在此改
+  // （那要重建容器），这里只动 iSpace 侧的展示与鉴权。
+  app.patch(`${API_BASE}/backends/:id`, async (req) => {
+    const me = await requireAuth(req);
+    const { id } = req.params as { id: string };
+    const input = updateBackendSchema.parse(req.body ?? {});
+    const rows = await sql`SELECT * FROM ispace.backends WHERE id = ${id} AND owner_id = ${me.id}`;
+    if (!rows[0]) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端，或它不属于你。');
+
+    const updated = await sql`
+      UPDATE ispace.backends
+         SET exposed    = ${input.exposed ?? (rows[0] as { exposed: boolean }).exposed},
+             visibility = ${input.visibility ?? (rows[0] as { visibility: string }).visibility}
+       WHERE id = ${id}
+      RETURNING *
+    `;
+    await writeAudit(sql, {
+      actorId: me.id, action: 'backend.update', targetType: 'backend',
+      targetId: id, source: 'console', result: 'success',
+      metadata: { exposed: input.exposed, visibility: input.visibility }, ip: req.ip,
+    });
+    return { backend: toBackend(updated[0] as Record<string, unknown>) };
   });
 
   // ── 重启 ──────────────────────────────────────────────────────────

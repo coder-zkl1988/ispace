@@ -113,6 +113,11 @@ export interface InstalledApp {
   owner_username: string; owner_name: string;
 }
 
+export interface ExposedBackend {
+  id: string; name: string; urlPath: string; status: string;
+  visibility: 'private' | 'shared' | 'public'; exposed: boolean;
+}
+
 export interface AuthPolicy {
   emailDomains: string[];
   passwordMin: number;
@@ -197,6 +202,7 @@ export const api = {
     fetch(`/deploy/api/marketplace/${appId}`, { method: 'DELETE', credentials: 'same-origin' })
       .then((r) => r.json() as Promise<{ ok: boolean }>),
   installed: () => get<{ installed: InstalledApp[] }>('/installed'),
+  backends: () => get<{ backends: ExposedBackend[] }>('/backends'),
   /** 把别人的页面从我的空间移除。分享来的与市场装的都走这一个。 */
   removeInstalled: (appId: string) => del<{ ok: boolean }>(`/installed/${appId}`),
   /** 管理员下架别人上架的内容。只下架，不删应用。 */
