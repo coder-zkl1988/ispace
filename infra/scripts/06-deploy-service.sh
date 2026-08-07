@@ -24,7 +24,15 @@ echo "== 2. 构建镜像并启动 =="
 set -eu
 cd ~/ispace-src
 
-docker build -f apps/deploy-service/Dockerfile -t ispace/deploy-service:latest . 2>&1 | tail -6
+# 可选国内 alpine 镜像源。镜像里要 apk add chromium（截图封面用），而官方
+# CDN dl-cdn.alpinelinux.org 在国内极慢甚至超时——实测卡 40 分钟仍装不完。
+# ISPACE_ALPINE_MIRROR 设成 mirrors.aliyun.com 之类即秒下。build 早于下面的
+# 密钥注入，所以这里单独先 source 一次 env 取这个变量。
+[ -f ~/.ispace/env ] && . ~/.ispace/env
+docker build -f apps/deploy-service/Dockerfile \
+  --build-arg "ALPINE_MIRROR=${ISPACE_ALPINE_MIRROR:-}" \
+  --build-arg "GITHUB_PROXY=${ISPACE_GITHUB_PROXY:-}" \
+  -t ispace/deploy-service:latest . 2>&1 | tail -6
 
 # 从 ~/.ispace 注入密钥；不落进 compose 文件，也不进仓库
 set -a

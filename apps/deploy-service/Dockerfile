@@ -30,13 +30,27 @@ RUN pnpm --filter @ispace/deploy-service --prod --legacy deploy /out
 
 FROM node:22-alpine AS runtime
 
+# 可选国内 alpine 镜像源。镜像里要 apk add chromium，而官方 CDN
+# dl-cdn.alpinelinux.org 在国内极慢甚至超时。构建时传
+# --build-arg ALPINE_MIRROR=mirrors.aliyun.com 改用国内源；不传则用官方 CDN，
+# 仓库保持中性。sed 只换 host、保留 /alpine/vX.Y/main 那段，故与 alpine 版本无关。
+ARG ALPINE_MIRROR=""
+RUN if [ -n "$ALPINE_MIRROR" ]; then \
+      sed -i "s#dl-cdn.alpinelinux.org#${ALPINE_MIRROR}#g" /etc/apk/repositories; \
+    fi
+
 # tini 做 PID 1 以正确转发信号，否则 docker stop 会等满超时才强杀，
 # 发布中途被杀可能留下半成品目录。
 # gitleaks 作为第二道深度扫描（规格 §9），打进镜像而非起容器——
 # 后者要挂 docker socket，为扫密钥开一个容器逃逸的口子不划算。
+# 可选 github 代理。gitleaks 的二进制在 github release 上，而国内直连 github
+# 常超时。构建时传 --build-arg GITHUB_PROXY=https://ghfast.top/ 走代理下载。
+# 默认空=直连，仓库保持中性。
+ARG GITHUB_PROXY=""
 RUN apk add --no-cache tini curl \
  && ARCH=$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/') \
- && curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_${ARCH}.tar.gz" \
+ && curl -sSL --retry 3 --retry-delay 2 \
+    "${GITHUB_PROXY}https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_${ARCH}.tar.gz" \
     | tar xz -C /usr/local/bin gitleaks \
  && chmod +x /usr/local/bin/gitleaks \
  && gitleaks version
