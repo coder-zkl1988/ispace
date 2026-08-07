@@ -183,8 +183,9 @@ export function backendUrlPath(username: string, name: string): string {
  *   POST /api/application.update  { applicationId, cpuLimit, memoryLimit } → true
  *   POST /api/application.delete  { applicationId }
  *
- * 注意 memoryLimit 是**字节数的字符串**，不是 MB 数字——传错不会报错，
- * 只会让限额变成一个荒谬的值。
+ * 两个单位坑，传错都不报错、只让限额变成荒谬的值：
+ *   - cpuLimit：v0.29.14 起是**裸 NanoCPU**（1 核 = 1e9），不是核数。见 setLimits。
+ *   - memoryLimit：**字节数的字符串**，不是 MB 数字。
  */
 export class DokployOrchestrator implements Orchestrator {
   readonly name = 'dokploy';
@@ -371,8 +372,15 @@ export class DokployOrchestrator implements Orchestrator {
   async setLimits(ref: BackendAppRef, limits: ResourceLimits): Promise<void> {
     await this.call('application.update', {
       applicationId: ref.id,
-      cpuLimit: String(limits.cpu),
-      // 字节数的字符串。传 MB 数字不会报错，只会让限额变成荒谬的值。
+      // Dokploy v0.29.14 起，cpuLimit 是**裸 NanoCPU**（1 核 = 1e9），不再是核数
+      // 字符串。传 "0.5" 会被当成 0.5 纳核 ≈ 0，容器被饿死却不报错——它照常起来、
+      // 平台显示"运行中"，只是慢得像死了。核数 × 1e9 转过去；实测一个 2 核应用
+      // 在库里正是存成 "2000000000"。
+      // ResourceLimits.cpu 仍保持核数（人类单位，UI 显示「0.5 vCPU」），只在这条
+      // 出线处换算，别的地方不受影响。
+      cpuLimit: String(Math.round(limits.cpu * 1e9)),
+      // memoryLimit 一直是字节数的字符串，这个改动没动它。传 MB 数字会让限额
+      // 变成荒谬的小值。
       memoryLimit: String(limits.memoryMb * 1024 * 1024),
     });
   }

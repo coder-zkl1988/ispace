@@ -60,3 +60,45 @@ describe('实现选择', () => {
     expect(createOrchestrator({} as NodeJS.ProcessEnv)).toBeInstanceOf(MockOrchestrator);
   });
 });
+
+describe('Dokploy cpuLimit 单位（v0.29.14 起为 NanoCPU）', () => {
+  /**
+   * v0.29.14 把 cpuLimit 从核数字符串改成裸 NanoCPU（1 核 = 1e9）。
+   * 传错不报错、只让容器被饿死，所以这条断言 stub 掉 fetch，直接看
+   * setLimits 发出去的 payload。
+   */
+  function stubFetch() {
+    const calls: { url: string; body: any }[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: any) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return { ok: true, status: 200, text: async () => 'true' } as Response;
+    }) as typeof fetch;
+    return { calls, restore: () => { globalThis.fetch = orig; } };
+  }
+
+  it('0.5 核发成 500000000 纳核，不是 "0.5"', async () => {
+    const { calls, restore } = stubFetch();
+    try {
+      const o = new DokployOrchestrator({ baseUrl: 'http://dok', token: 't' });
+      await o.setLimits({ id: 'app1', urlPath: '/x' }, { cpu: 0.5, memoryMb: 512 });
+      const body = calls.find((c) => c.url.endsWith('/application.update'))!.body;
+      expect(body.cpuLimit).toBe('500000000');
+      // 内存这次没变，仍是字节数
+      expect(body.memoryLimit).toBe(String(512 * 1024 * 1024));
+    } finally {
+      restore();
+    }
+  });
+
+  it('2 核 → 2000000000，与库里实测的 2 核应用一致', async () => {
+    const { calls, restore } = stubFetch();
+    try {
+      const o = new DokployOrchestrator({ baseUrl: 'http://dok', token: 't' });
+      await o.setLimits({ id: 'app2', urlPath: '/x' }, { cpu: 2, memoryMb: 1024 });
+      expect(calls[0]!.body.cpuLimit).toBe('2000000000');
+    } finally {
+      restore();
+    }
+  });
+});
