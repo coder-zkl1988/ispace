@@ -24,6 +24,8 @@ export interface CreateBackendInput {
   sourceRepo?: string | undefined;
   /** 容器内监听端口。省略按 3000（Node 的惯例）。 */
   port?: number | undefined;
+  /** 是否露出到「我的空间」。默认 false（纯 API 服务）。 */
+  exposed?: boolean | undefined;
   /**
    * 主要服务于哪个页面。**可选的备注，不是使用前提。**
    *
@@ -58,6 +60,12 @@ export interface Backend {
   memLimitMb: number;
   status: string;
   urlPath: string;
+  port: number;
+  /** 是否在「我的空间」露出。false=纯 API 服务，只对控制台与 AI 可见。 */
+  exposed: boolean;
+  /** 露出后的访问范围，与页面同义。exposed=false 时无意义。 */
+  visibility: 'private' | 'shared' | 'public';
+  containerName: string | null;
   orchestratorRef: string | null;
   createdAt: Date;
 }
@@ -74,6 +82,10 @@ export function toBackend(r: Record<string, unknown>): Backend {
     memLimitMb: Number(r.mem_limit_mb),
     status: r.status as string,
     urlPath: r.url_path as string,
+    port: Number(r.port ?? 3000),
+    exposed: Boolean(r.exposed),
+    visibility: (r.visibility as 'private' | 'shared' | 'public') ?? 'private',
+    containerName: (r.container_name as string | null) ?? null,
     orchestratorRef: r.orchestrator_ref as string | null,
     createdAt: r.created_at as Date,
   };
@@ -137,11 +149,11 @@ export async function createBackend(
 
   const rows = await sql`
     INSERT INTO ispace.backends
-      (owner_id, app_id, name, source_repo, cpu_limit, mem_limit_mb, status, url_path)
+      (owner_id, app_id, name, source_repo, cpu_limit, mem_limit_mb, status, url_path, port, exposed)
     VALUES (${user.id}, ${appId}, ${input.name}, ${input.sourceRepo ?? null},
             ${Number(policy.backendCpuLimit)},
             ${Math.round(policy.backendMemoryBytes / 1024 / 1024)},
-            'creating', ${urlPath})
+            'creating', ${urlPath}, ${input.port ?? 3000}, ${input.exposed ?? false})
     RETURNING *
   `;
   const row = toBackend(rows[0] as Record<string, unknown>);

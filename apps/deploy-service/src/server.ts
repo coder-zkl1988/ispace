@@ -64,6 +64,7 @@ import { registerDataSpaceRoutes } from './routes/dataspace.js';
 import { registerAccountRoutes } from './routes/account.js';
 import { registerOverviewRoutes } from './routes/overview.js';
 import { registerAuthzRoutes } from './routes/authz.js';
+import { registerSvcProxy } from './routes/svc-proxy.js';
 import { registerConnectorRoutes } from './routes/connectors.js';
 
 declare module 'fastify' {
@@ -942,6 +943,12 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
   registerAuthzRoutes(app, {
     sql,
     publicBase: PUBLIC_BASE,
+    verifySession: (t) => sessions.verify(t).catch(() => null),
+  });
+
+  // 后端服务的鉴权代理（/svc/...）。Caddy 把 /svc 转过来，这里鉴权后代到容器。
+  registerSvcProxy(app, {
+    sql,
     verifySession: (t) => sessions.verify(t).catch(() => null),
   });
 
