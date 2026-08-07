@@ -299,7 +299,9 @@ function Shell({
         />
       </header>
 
-      <main style={{ maxWidth: 'var(--content-max)', margin: '0 auto', padding: 'var(--space-16) var(--space-12) var(--space-24)' }}>
+      {/* 1120 在宽屏上两侧留白太多、卡片墙只排得下三列。提到 1400 挤走留白，
+          能排四列，卡片更充实——「我的页面」与「创意市场」两个 tab 都走这个 main。 */}
+      <main style={{ maxWidth: 1400, margin: '0 auto', padding: 'var(--space-16) var(--space-12) var(--space-24)' }}>
         {children}
       </main>
       {qrOpen && <QrLoginDialog onClose={() => setQrOpen(false)} />}

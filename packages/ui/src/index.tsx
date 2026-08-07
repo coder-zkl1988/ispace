@@ -205,15 +205,18 @@ export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
  * onError 时把自己收起来，视觉上等同于「这张卡没有封面」。
  */
 export function CoverBanner({
-  src, alt, height = 132,
-}: { src: string; alt: string; height?: number }) {
+  src, alt, ratio = '16 / 9',
+}: { src: string; alt: string; ratio?: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
   return (
     <div style={{
       // 出血到卡片边缘：抵掉 Card 的 padding(--space-10)，上圆角对齐 Card(--radius-16)
       margin: 'calc(-1 * var(--space-10)) calc(-1 * var(--space-10)) 0',
-      height, overflow: 'hidden', borderRadius: 'var(--radius-16) var(--radius-16) 0 0',
+      // 固定高度会随卡片宽度忽扁忽方——窄列上就接近 1:1，难看。改用宽高比，
+      // 任何列宽下都是一致的横向比例。16:9 正好是自动截图的原生比例，不裁切。
+      aspectRatio: ratio,
+      overflow: 'hidden', borderRadius: 'var(--radius-16) var(--radius-16) 0 0',
       background: 'var(--surface-sunken, #f3f3ee)',
     }}>
       <img
