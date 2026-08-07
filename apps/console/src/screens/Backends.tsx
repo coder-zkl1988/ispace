@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Badge, Button, Card, copyText, Dialog, fmtDate, Input, PageTitle, StatusDot,
+  Badge, Button, Card, copyText, Dialog, fmtDate, Input, PageTitle, Select, StatusDot,
   useConfirm, useCopy,
 } from '@ispace/ui';
 import { api, type Backend, type Me } from '../api';
@@ -26,6 +26,8 @@ export function Backends({ me }: { me: Me }) {
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   /** 展开中的那条的部署日志。失败的后端不看日志就只剩「失败」两个字。 */
   const [logOf, setLogOf] = useState<{ id: string; name: string; text: string } | null>(null);
+  /** 正在管理访问名单的后端（visibility=shared 时）。 */
+  const [shareOf, setShareOf] = useState<Backend | null>(null);
 
   const captureError = (error: unknown) => {
     const e = error as Error & { details?: Record<string, unknown> };
@@ -174,9 +176,21 @@ export function Backends({ me }: { me: Me }) {
                     <td style={{ padding: 'var(--space-5) var(--space-8)', whiteSpace: 'nowrap' }}>
                       {b.exposed ? (
                         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                          <Badge tone={b.visibility === 'public' ? 'success' : 'brand'}>
-                            {b.visibility === 'public' ? '全公司' : b.visibility === 'shared' ? '指定同事' : '仅自己'}
-                          </Badge>
+                          <Select
+                            value={b.visibility}
+                            onChange={(v) => void act(
+                              () => api.updateBackend(b.id, { visibility: v as 'private' | 'shared' | 'public' }),
+                              `已改「${b.name}」的可见范围`,
+                            )}
+                            items={[
+                              { value: 'private', label: '仅自己' },
+                              { value: 'shared', label: '指定同事' },
+                              { value: 'public', label: '全公司' },
+                            ]}
+                          />
+                          {b.visibility === 'shared' && (
+                            <Button size="sm" variant="ghost" onClick={() => setShareOf(b)}>管理</Button>
+                          )}
                           <Button size="sm" variant="ghost" disabled={busy}
                             onClick={() => void act(() => api.updateBackend(b.id, { exposed: false }), `已从空间收回「${b.name}」`)}>收回</Button>
                         </span>
@@ -281,7 +295,64 @@ export function Backends({ me }: { me: Me }) {
           }}>{errorDetail}</pre>
         </Dialog>
       )}
+      {shareOf && <BackendShareDialog backend={shareOf} onClose={() => setShareOf(null)} />}
       {confirmUI}
     </>
+  );
+}
+
+/**
+ * 管理某个后端的访问名单（visibility=shared 时）。
+ * 后端分享是即时授予、无需对方接受，所以这里加一个人就直接生效。
+ */
+function BackendShareDialog({ backend, onClose }: { backend: Backend; onClose: () => void }) {
+  const [shares, setShares] = useState<{ username: string; displayName: string }[]>([]);
+  const [username, setUsername] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = () => void api.backendShares(backend.id).then((r) => setShares(r.shares)).catch(() => { /* 首次为空 */ });
+  useEffect(load, [backend.id]);
+
+  const add = async () => {
+    if (!username.trim()) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.addBackendShare(backend.id, username.trim());
+      setUsername('');
+      load();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const remove = async (u: string) => {
+    await api.removeBackendShare(backend.id, u).catch(() => { /* load 会还原 */ });
+    load();
+  };
+
+  return (
+    <Dialog open onClose={onClose} width={460}
+      title={`「${backend.name}」可访问的同事`}
+      description="加了就能访问，无需对方接受；这个后端只有这些人和你能打开。"
+    >
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <Input value={username} placeholder="同事的空间标识，如 lixiao"
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void add(); }} />
+        <Button variant="primary" disabled={busy || !username.trim()} onClick={add}>添加</Button>
+      </div>
+      {err && <div style={{ color: 'var(--error)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      {shares.length === 0 ? (
+        <div style={{ opacity: .6, fontSize: 13 }}>还没有分享给任何人。</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {shares.map((s) => (
+            <div key={s.username} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{s.displayName} <span className="mono" style={{ opacity: .55, fontSize: 12 }}>{s.username}</span></span>
+              <Button size="sm" variant="ghost" onClick={() => void remove(s.username)}>移除</Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Dialog>
   );
 }

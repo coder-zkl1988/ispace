@@ -20,8 +20,8 @@ import type { SessionClaims } from '@ispace/auth';
  *     用户）——因为调它的页面被登录用户打开，分享出去的页面也要能调到。
  *   - exposed=true（全栈项目）：按 visibility 三档，与页面完全一致。
  *
- * 本期先做 private / public 与 API-only 三种。shared（指定同事）要等后端分享
- * 那套 UI，落地前一律按未授权处理，不静默放行。
+ * 三档都已落地：private（仅本人/管理员）、shared（backend_shares 里有授权的
+ * 同事）、public（任何登录用户）。加上 API-only 那种共四种判定。
  */
 
 /**
@@ -38,6 +38,7 @@ const DROP_HEADERS = new Set([
 ]);
 
 interface BackendRow {
+  id: string;
   owner_id: string;
   exposed: boolean;
   visibility: string;
@@ -67,14 +68,25 @@ export function registerSvcProxy(
     }
   }
 
-  app.all('/svc/:user/:name', handler);
-  app.all('/svc/:user/:name/*', handler);
+  // 路由放进封装插件，好在**只在这个作用域内**换 body 解析器。
+  //
+  // 代理要原样转发任意内容类型——文件上传、multipart 表单、二进制。默认的
+  // JSON 解析器会把 body 解析成对象，再序列化回去就毁了二进制（stirling-pdf
+  // 这类上传应用首当其冲）。先清掉继承来的所有解析器（否则 application/json
+  // 仍会被解析），再挂一个把一切都当 buffer 的解析器。app 其余 JSON 路由不受
+  // 影响，因为这是封装的子作用域。
+  void app.register(async (scoped) => {
+    scoped.removeAllContentTypeParsers();
+    scoped.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+    scoped.all('/svc/:user/:name', handler);
+    scoped.all('/svc/:user/:name/*', handler);
+  });
 
   async function handler(req: FastifyRequest, reply: FastifyReply) {
     const { user, name } = req.params as { user: string; name: string; '*'?: string };
 
     const [row] = await sql<BackendRow[]>`
-      SELECT b.owner_id, b.exposed, b.visibility, b.status, b.container_name, b.port
+      SELECT b.id, b.owner_id, b.exposed, b.visibility, b.status, b.container_name, b.port
         FROM ispace.backends b
         JOIN ispace.users u ON u.id = b.owner_id
        WHERE u.username = ${user} AND b.name = ${name} AND u.status <> 'archived'
@@ -133,8 +145,9 @@ export function registerSvcProxy(
       );
       up.setTimeout(30_000, () => up.destroy(new Error('上游超时')));
       up.on('error', reject);
-      if (req.method !== 'GET' && req.method !== 'HEAD' && req.body !== undefined) {
-        up.end(typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      // body 是原始 Buffer（上面的 buffer 解析器保证），原样转发，不碰内容
+      if (req.method !== 'GET' && req.method !== 'HEAD' && Buffer.isBuffer(req.body) && req.body.length) {
+        up.end(req.body);
       } else {
         up.end();
       }
@@ -164,7 +177,14 @@ export function registerSvcProxy(
     if (!row.exposed) return 'ok';
     // 露出的按 visibility 三档
     if (row.visibility === 'public') return 'ok';
-    // shared 要等后端分享 UI，未落地前不放行（不静默通过）
+    // shared：得有一条授权记录
+    if (row.visibility === 'shared') {
+      const [grant] = await sql`
+        SELECT 1 FROM ispace.backend_shares
+         WHERE backend_id = ${row.id} AND to_user_id = ${claims.uid} LIMIT 1
+      `;
+      if (grant) return 'ok';
+    }
     return 'deny';
   }
 }

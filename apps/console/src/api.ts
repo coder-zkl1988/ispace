@@ -404,6 +404,12 @@ export const api = {
   }>('/backends'),
   updateBackend: (id: string, body: { exposed?: boolean; visibility?: 'private' | 'shared' | 'public' }) =>
     req<{ backend: Backend }>(`/backends/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  backendShares: (id: string) =>
+    req<{ shares: { username: string; displayName: string }[] }>(`/backends/${id}/shares`),
+  addBackendShare: (id: string, toUsername: string) =>
+    req<{ ok: boolean }>(`/backends/${id}/shares`, { method: 'POST', body: JSON.stringify({ toUsername }) }),
+  removeBackendShare: (id: string, username: string) =>
+    req<{ ok: boolean }>(`/backends/${id}/shares/${username}`, { method: 'DELETE' }),
   createBackend: (name: string, sourceRepo: string, port = 3000, appSlug?: string) =>
     req<{ backend: Backend; url: string }>('/backends', {
       method: 'POST', body: JSON.stringify({ name, sourceRepo, port, appSlug }),

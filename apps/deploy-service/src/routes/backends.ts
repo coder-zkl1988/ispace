@@ -124,6 +124,57 @@ export function registerBackendRoutes(
     return { backend: toBackend(updated[0] as Record<string, unknown>) };
   });
 
+  // ── 后端分享（shared 可见档的授权名单）─────────────────────────────
+  // 与页面分享不同：后端是活服务，分享=直接授予访问，无需对方接受、不进对方
+  // 空间。授权名单就是 visibility=shared 时鉴权代理放行的依据。
+  app.get(`${API_BASE}/backends/:id/shares`, async (req) => {
+    const me = await requireAuth(req);
+    const { id } = req.params as { id: string };
+    const own = await sql`SELECT 1 FROM ispace.backends WHERE id = ${id} AND owner_id = ${me.id}`;
+    if (!own[0]) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端，或它不属于你。');
+    const rows = await sql<{ username: string; display_name: string }[]>`
+      SELECT u.username, u.display_name
+        FROM ispace.backend_shares s JOIN ispace.users u ON u.id = s.to_user_id
+       WHERE s.backend_id = ${id} ORDER BY s.created_at DESC
+    `;
+    return { shares: rows.map((r) => ({ username: r.username, displayName: r.display_name })) };
+  });
+
+  app.post(`${API_BASE}/backends/:id/shares`, async (req) => {
+    const me = await requireAuth(req);
+    const { id } = req.params as { id: string };
+    const { toUsername } = (req.body ?? {}) as { toUsername?: string };
+    const own = await sql`SELECT 1 FROM ispace.backends WHERE id = ${id} AND owner_id = ${me.id}`;
+    if (!own[0]) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端，或它不属于你。');
+    const [target] = await sql<{ id: string }[]>`
+      SELECT id FROM ispace.users WHERE username = ${toUsername ?? ''} AND status = 'active'
+    `;
+    if (!target) throw new IspaceError(ERROR_CODES.NOT_FOUND, `找不到同事「${toUsername}」。`);
+    if (target.id === me.id) throw new IspaceError(ERROR_CODES.INVALID_INPUT, '不用分享给自己。');
+    await sql`
+      INSERT INTO ispace.backend_shares (backend_id, to_user_id)
+      VALUES (${id}, ${target.id}) ON CONFLICT DO NOTHING
+    `;
+    await writeAudit(sql, {
+      actorId: me.id, action: 'backend.share', targetType: 'backend', targetId: id,
+      source: 'console', result: 'success', metadata: { toUsername }, ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  app.delete(`${API_BASE}/backends/:id/shares/:username`, async (req) => {
+    const me = await requireAuth(req);
+    const { id, username } = req.params as { id: string; username: string };
+    const own = await sql`SELECT 1 FROM ispace.backends WHERE id = ${id} AND owner_id = ${me.id}`;
+    if (!own[0]) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端，或它不属于你。');
+    await sql`
+      DELETE FROM ispace.backend_shares
+       WHERE backend_id = ${id}
+         AND to_user_id = (SELECT id FROM ispace.users WHERE username = ${username})
+    `;
+    return { ok: true };
+  });
+
   // ── 重启 ──────────────────────────────────────────────────────────
   /**
    * 重新配置源并部署。
