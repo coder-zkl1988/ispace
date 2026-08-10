@@ -22,6 +22,7 @@ import { AdminSettings } from './screens/AdminSettings';
 import { AdminResources } from './screens/AdminResources';
 import { AdminAudit } from './screens/AdminAudit';
 import { AdminInspection } from './screens/AdminInspection';
+import { AdminApps } from './screens/AdminApps';
 
 /**
  * 控制台（设计稿：员工 8 屏 + 管理员 5 屏）。
@@ -40,7 +41,7 @@ type EmployeeScreen =
   | 'mobile' | 'quota' | 'audit' | 'guide';
 type AdminScreen =
   | 'a-overview' | 'a-users' | 'a-tokens'
-  | 'a-connectors'
+  | 'a-connectors' | 'a-apps'
   | 'a-resources' | 'a-settings' | 'a-audit' | 'a-inspection';
 type Screen = EmployeeScreen | AdminScreen;
 
@@ -81,6 +82,7 @@ const ADMIN_NAV: { group: string; items: { key: AdminScreen; label: string; icon
   {
     group: '治理',
     items: [
+      { key: 'a-apps', label: '全部作品', icon: 'search' },
       { key: 'a-resources', label: '资源与配额', icon: 'sliders' },
       { key: 'a-settings', label: '平台设置', icon: 'settings' },
       { key: 'a-audit', label: '审计与安全', icon: 'book' },
@@ -179,6 +181,7 @@ function Screens({ screen, me }: { screen: Screen; me: Me }) {
     case 'a-users':      return <AdminUsers />;
     case 'a-tokens':     return <AdminTokens />;
     case 'a-connectors': return <AdminConnectors />;
+    case 'a-apps':       return <AdminApps />;
     case 'a-resources':  return <AdminResources />;
     case 'a-settings':   return <AdminSettings />;
     case 'a-audit':      return <AdminAudit />;

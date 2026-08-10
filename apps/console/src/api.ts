@@ -115,6 +115,23 @@ export interface AdminUser {
 
 export interface AuditEntry extends AuditLog { actorUsername: string }
 
+/** GET /admin/apps 的原始行，蛇形命名——跟 AdminToken 一样直接透传 SQL 行，没有服务端重塑。 */
+export interface AdminApp {
+  id: string; slug: string; name: string; description: string | null;
+  category: string | null; visibility: 'private' | 'shared' | 'public';
+  status: 'running' | 'building' | 'stopped';
+  cover_path: string | null; size_bytes: number; created_at: string; updated_at: string;
+  owner_username: string; owner_name: string; listed: boolean;
+}
+
+/** GET /admin/backends 的原始行，同上不重塑。 */
+export interface AdminBackend {
+  id: string; name: string; url_path: string; category: string | null;
+  visibility: 'private' | 'shared' | 'public';
+  status: 'creating' | 'running' | 'stopped' | 'failed';
+  created_at: string; owner_username: string; owner_name: string; listed: boolean;
+}
+
 
 export interface HostLoad {
   cpu: { percent: number; cores: number };
@@ -392,6 +409,34 @@ export const api = {
   adminUnlist: (appId: string) =>
     req<{ ok: boolean }>(`/admin/marketplace/${appId}`, { method: 'DELETE' }),
   adminBlocked: () => req<{ items: BlockedItem[] }>('/admin/blocked'),
+
+  /*
+    「全部作品」：管理员合规巡查用。市场列表只看得到别人主动上架的东西，
+    这里不按可见范围过滤——管理员本来就该能看到全部页面/后端。
+  */
+  adminApps: () => req<{ apps: AdminApp[] }>('/admin/apps'),
+  adminAllBackends: () => req<{ backends: AdminBackend[] }>('/admin/backends'),
+  adminSetAppCategory: (appId: string, category: string) =>
+    req<{ ok: boolean }>(`/admin/apps/${appId}/category`, {
+      method: 'PATCH', body: JSON.stringify({ category }),
+    }),
+  adminSetBackendCategory: (backendId: string, category: string) =>
+    req<{ ok: boolean }>(`/admin/backends/${backendId}/category`, {
+      method: 'PATCH', body: JSON.stringify({ category }),
+    }),
+  /** 下架：跟 adminUnlist 不同，这条真正掐断访问（status=stopped），不只是摘市场 listing。 */
+  adminTakedownApp: (appId: string, reason?: string) =>
+    req<{ ok: boolean }>(`/admin/apps/${appId}/takedown`, {
+      method: 'POST', body: JSON.stringify(reason ? { reason } : {}),
+    }),
+  adminRestoreApp: (appId: string) =>
+    req<{ ok: boolean }>(`/admin/apps/${appId}/restore`, { method: 'POST' }),
+  adminTakedownBackend: (backendId: string, reason?: string) =>
+    req<{ ok: boolean }>(`/admin/backends/${backendId}/takedown`, {
+      method: 'POST', body: JSON.stringify(reason ? { reason } : {}),
+    }),
+  adminRestoreBackend: (backendId: string) =>
+    req<{ ok: boolean }>(`/admin/backends/${backendId}/restore`, { method: 'POST' }),
   adminJobs: () => req<{
     jobs: JobHeartbeat[];
     known: { name: string; label: string; every: string; install: string }[];

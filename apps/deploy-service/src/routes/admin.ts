@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { API_BASE, ERROR_CODES, IspaceError, type User } from '@ispace/contracts';
+import {
+  API_BASE, ERROR_CODES, IspaceError, marketplaceCategorySchema, type User,
+} from '@ispace/contracts';
 import { provisionUserSchema, writeAudit, type Sql } from '@ispace/db';
 import type { Orchestrator } from '@ispace/orchestrator';
+import { z } from 'zod';
 import { offboardUser, restoreUser } from '../services/offboard.js';
 
 /**
@@ -485,6 +488,183 @@ export function registerAdminRoutes(
       actorId: admin.id, action: 'backend.update', targetType: 'backend', targetId: backendId,
       source: 'console', result: 'success',
       metadata: { unlistedByAdmin: true, name: row.name, owner: row.username },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  // ── 全部作品：合规巡查 ────────────────────────────────────────────
+  /**
+   * 市场列表只看得到别人**主动上架**的东西——大多数页面/后端从没上过市场，
+   * 出了合规问题（内容违规、员工离职前的遗留内容）之前完全看不见，只能
+   * 挨个去问"你发布过什么"。这里给一份全平台清单，不按可见范围过滤——
+   * 管理员本来就该能看到全部，这正是这一屏存在的理由。
+   */
+  app.get(`${API_BASE}/admin/apps`, async (req) => {
+    await requireAdmin(req);
+    const rows = await sql`
+      SELECT a.id, a.slug, a.name, a.description, a.category, a.visibility, a.status,
+             a.cover_path, a.size_bytes, a.created_at, a.updated_at,
+             u.username AS owner_username, u.display_name AS owner_name,
+             (ml.id IS NOT NULL) AS listed
+        FROM ispace.apps a
+        JOIN ispace.users u ON u.id = a.owner_id
+        LEFT JOIN ispace.marketplace_listings ml ON ml.app_id = a.id
+       ORDER BY a.updated_at DESC
+    `;
+    return { apps: rows };
+  });
+
+  app.get(`${API_BASE}/admin/backends`, async (req) => {
+    await requireAdmin(req);
+    const rows = await sql`
+      SELECT b.id, b.name, b.url_path, b.category, b.visibility, b.status, b.created_at,
+             u.username AS owner_username, u.display_name AS owner_name,
+             (ml.id IS NOT NULL) AS listed
+        FROM ispace.backends b
+        JOIN ispace.users u ON u.id = b.owner_id
+        LEFT JOIN ispace.marketplace_listings ml ON ml.backend_id = b.id
+       ORDER BY b.created_at DESC
+    `;
+    return { backends: rows };
+  });
+
+  const adminCategorySchema = z.object({ category: marketplaceCategorySchema });
+
+  /** 分类本来只有作者能改（marketplace.ts 那条 PATCH 认 owner_id）——这条给管理员开一个不受所有权限制的旁路，同一件事，跟别人的分类。 */
+  app.patch(`${API_BASE}/admin/apps/:appId/category`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { appId } = req.params as { appId: string };
+    const { category } = adminCategorySchema.parse(req.body);
+    const [row] = await sql<{ name: string; username: string }[]>`
+      UPDATE ispace.apps a SET category = ${category}
+       FROM ispace.users u
+       WHERE a.id = ${appId} AND a.owner_id = u.id
+      RETURNING a.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个页面');
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'app.category_change', targetType: 'app', targetId: appId,
+      source: 'console', result: 'success',
+      metadata: { category, byAdmin: true, app: row.name, owner: row.username },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  app.patch(`${API_BASE}/admin/backends/:backendId/category`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { backendId } = req.params as { backendId: string };
+    const { category } = adminCategorySchema.parse(req.body);
+    const [row] = await sql<{ name: string; username: string }[]>`
+      UPDATE ispace.backends b SET category = ${category}
+       FROM ispace.users u
+       WHERE b.id = ${backendId} AND b.owner_id = u.id
+      RETURNING b.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端');
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'backend.category_change', targetType: 'backend', targetId: backendId,
+      source: 'console', result: 'success',
+      metadata: { category, byAdmin: true, name: row.name, owner: row.username },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  const takedownBodySchema = z.object({ reason: z.string().trim().max(200).optional() });
+
+  /**
+   * 下架（强制停用）。与上面「创意市场：管理员下架」不同——那条只摘市场
+   * listing，页面自己还在跑，知道直链或分享过的人照样能打开。这条真正
+   * 掐断访问：把 status 改成 stopped，authz 网关那道 404 gate（见
+   * authz.ts）立刻生效，不管访问者是不是从市场进来的。顺手把市场 listing
+   * 和别人的引用一并清掉，一次操作把"能不能被发现"和"能不能被打开"一起收掉。
+   *
+   * 只停用不删除：内容仍属于作者，管理员做的是收权限，不是替作者销毁数据——
+   * 跟「离职回收」同一个判断，也是为什么有对应的 restore。
+   */
+  app.post(`${API_BASE}/admin/apps/:appId/takedown`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { appId } = req.params as { appId: string };
+    const { reason } = takedownBodySchema.parse(req.body ?? {});
+    const [row] = await sql<{ name: string; username: string }[]>`
+      UPDATE ispace.apps a SET status = 'stopped'
+       FROM ispace.users u
+       WHERE a.id = ${appId} AND a.owner_id = u.id
+      RETURNING a.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个页面');
+    await sql`DELETE FROM ispace.marketplace_listings WHERE app_id = ${appId}`;
+    await sql`DELETE FROM ispace.app_installs WHERE app_id = ${appId} AND source = 'marketplace'`;
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'app.takedown', targetType: 'app', targetId: appId,
+      source: 'console', result: 'success',
+      metadata: { app: row.name, owner: row.username, reason: reason ?? null },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  app.post(`${API_BASE}/admin/apps/:appId/restore`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { appId } = req.params as { appId: string };
+    const [row] = await sql<{ name: string; username: string }[]>`
+      UPDATE ispace.apps a SET status = 'running'
+       FROM ispace.users u
+       WHERE a.id = ${appId} AND a.owner_id = u.id
+      RETURNING a.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个页面');
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'app.restore', targetType: 'app', targetId: appId,
+      source: 'console', result: 'success',
+      metadata: { app: row.name, owner: row.username },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  // 后端同构：status='stopped' 时 svc-proxy.ts 同样一律 404（'failed' 也是，
+  // 但那是编排器自己报的故障态，不是下架该设的值）。不调用编排器——
+  // 跟「创意市场：管理员下架（后端）」一样是轻量 DB 操作，容器本身不动，
+  // restore 时原样能起来；真要连容器一起收回资源，走的是离职回收那条重路径。
+  app.post(`${API_BASE}/admin/backends/:backendId/takedown`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { backendId } = req.params as { backendId: string };
+    const { reason } = takedownBodySchema.parse(req.body ?? {});
+    const [row] = await sql<{ name: string; username: string }[]>`
+      UPDATE ispace.backends b SET status = 'stopped'
+       FROM ispace.users u
+       WHERE b.id = ${backendId} AND b.owner_id = u.id
+      RETURNING b.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端');
+    await sql`DELETE FROM ispace.marketplace_listings WHERE backend_id = ${backendId}`;
+    await sql`DELETE FROM ispace.backend_installs WHERE backend_id = ${backendId}`;
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'backend.takedown', targetType: 'backend', targetId: backendId,
+      source: 'console', result: 'success',
+      metadata: { name: row.name, owner: row.username, reason: reason ?? null },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
+  app.post(`${API_BASE}/admin/backends/:backendId/restore`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { backendId } = req.params as { backendId: string };
+    const [row] = await sql<{ name: string; username: string }[]>`
+      UPDATE ispace.backends b SET status = 'running'
+       FROM ispace.users u
+       WHERE b.id = ${backendId} AND b.owner_id = u.id
+      RETURNING b.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端');
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'backend.restore', targetType: 'backend', targetId: backendId,
+      source: 'console', result: 'success',
+      metadata: { name: row.name, owner: row.username },
       ip: req.ip,
     });
     return { ok: true };
