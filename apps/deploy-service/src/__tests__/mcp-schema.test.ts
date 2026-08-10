@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MCP_TOOL_DESCRIPTIONS, MCP_TOOL_NAMES } from '@ispace/contracts';
+import { MARKETPLACE_CATEGORIES, MCP_TOOL_DESCRIPTIONS, MCP_TOOL_NAMES } from '@ispace/contracts';
 import { zodToJsonSchema } from '../mcp/server.js';
 
 /**
@@ -27,6 +27,17 @@ describe('MCP 工具入参 schema', () => {
           description:
             '做出这个页面的需求描述（用户原话或你整理后的版本）。上架到创意市场后所有人可见，'
             + '别人点「做同款」会拿走它——请勿包含内部信息、密钥或客户数据。',
+        },
+        // 描述里拼了 MARKETPLACE_CATEGORIES：从同一个常量算期望值，不写死一份
+        // 快照——那份清单本身会变（今天就变过一次），写死的副本会在下次改动
+        // 时静默地再挂掉一遍，而不是跟着改。
+        category: {
+          type: 'string',
+          description:
+            '这个页面属于哪一类，用于创意市场的分类侧边栏。你最清楚它是什么，请判断后填。'
+            + `常见分类：${MARKETPLACE_CATEGORIES.join('、')}。`
+            + '**优先用这些现成的；都不贴切时，自己起一个贴切的短词**（2-6 字，如「学习工具」）。'
+            + '不填则归入「其他」。',
         },
       },
       required: ['site', 'zip'],

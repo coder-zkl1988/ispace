@@ -25,6 +25,7 @@ describe('app schema', () => {
     groupId: null,
     sortOrder: 0,
     visibility: 'private' as const,
+    category: null,
     sizeBytes: 1_800_000,
     lastAccessedAt: null,
     createdAt: '2026-07-30T14:22:00Z',
