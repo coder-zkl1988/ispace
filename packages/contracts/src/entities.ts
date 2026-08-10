@@ -76,7 +76,7 @@ export const appVisibilitySchema = z.enum(['private', 'shared', 'public']);
  * 所以 schema 是自由文本，不是枚举；空/未给按「其他」聚合。
  */
 export const MARKETPLACE_CATEGORIES = [
-  '效率工具', '数据看板', '表单问卷', '游戏娱乐', '旅行攻略', '官网展示', '生活服务', '其他',
+  '效率工具', '办公提效', '数据看板', '表单问卷', '游戏娱乐', '旅行攻略', '官网展示', '生活服务', '其他',
 ] as const;
 export type MarketplaceCategory = (typeof MARKETPLACE_CATEGORIES)[number];
 /** 自由文本：AI 可自造分类。留长度上限，避免有人塞一整句话进来当分类。 */
