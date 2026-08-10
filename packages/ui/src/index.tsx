@@ -688,10 +688,19 @@ export function Dialog({
   width?: number;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  // 调用方几乎总是传一个内联箭头函数（onClose={() => setOpen(false)}）——
+  // 那个引用每次调用方重渲染都会变。之前把 onClose 放进下面 effect 的依赖
+  // 数组，于是对话框里任何一个输入框敲一个字符（触发调用方 state 更新 →
+  // 重渲染 → onClose 换新引用）都会让这个 effect 重新跑一遍，包括
+  // panel.current?.focus()——焦点被从正在输入的框上抢回对话框外层容器，
+  // 打字打到一半突然失焦，中文输入法的组合输入直接被打断。
+  // 用 ref 存最新的 onClose，effect 只依赖 open，读的仍是当次最新回调。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose?.(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current?.(); };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -700,7 +709,7 @@ export function Dialog({
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
