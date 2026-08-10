@@ -114,6 +114,26 @@ export interface InstalledApp {
   owner_username: string; owner_name: string;
 }
 
+/**
+ * 后端在市场里的一条 listing。
+ *
+ * 与 Listing（页面）分成两个类型而不是共用一个大而全的接口：后端没有
+ * slug/type/source_prompt，封面是 has_cover 布尔位 + 固定地址，不是
+ * cover_path 直链——共用一个类型会让一半字段对另一半永远是 null，
+ * 门户拼列表时按 kind 区分渲染即可。
+ */
+export interface BackendListing {
+  id: string; backend_id: string; published_at: string; install_count: number;
+  category: string | null; name: string; status: string; has_cover: boolean;
+  owner_username: string; owner_name: string;
+  installed: boolean; mine: boolean;
+}
+
+export interface InstalledBackend {
+  id: string; name: string; status: string; url_path: string; has_cover: boolean;
+  owner_username: string; owner_name: string;
+}
+
 export interface ExposedBackend {
   id: string; name: string; urlPath: string; status: string;
   visibility: 'private' | 'shared' | 'public'; exposed: boolean; hasCover: boolean;
@@ -218,6 +238,18 @@ export const api = {
     post<{ ok: boolean }>(`/backends/${id}/shares`, { toUsername }),
   revokeBackendShareTo: (id: string, username: string) =>
     del<{ ok: boolean }>(`/backends/${id}/shares/${encodeURIComponent(username)}`),
+  /* 后端的市场列表/安装/分类是单独一组端点（见 marketplace.ts 里那条注释：
+     形状和页面差太多，UNION 对齐列类型不如两次请求，门户拼列表时合并）。 */
+  backendMarketplace: () => get<{ listings: BackendListing[] }>('/marketplace/backends'),
+  installBackendFromMarket: (backendId: string) =>
+    post<{ ok: boolean }>(`/marketplace/backends/${backendId}/install`),
+  uninstallBackendFromMarket: (backendId: string) =>
+    del<{ ok: boolean }>(`/marketplace/backends/${backendId}/install`),
+  setBackendListingCategory: (backendId: string, category: string) =>
+    patch<{ ok: boolean }>(`/marketplace/backends/${backendId}/category`, { category }),
+  installedBackends: () => get<{ installed: InstalledBackend[] }>('/installed/backends'),
+  removeInstalledBackend: (backendId: string) => del<{ ok: boolean }>(`/installed/backends/${backendId}`),
+  adminUnlistBackend: (backendId: string) => del<{ ok: boolean }>(`/admin/marketplace/backends/${backendId}`),
   /** 把别人的页面从我的空间移除。分享来的与市场装的都走这一个。 */
   removeInstalled: (appId: string) => del<{ ok: boolean }>(`/installed/${appId}`),
   /** 管理员下架别人上架的内容。只下架，不删应用。 */

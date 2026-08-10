@@ -9,6 +9,7 @@ import {
   api, ownerFromPath,
   type ApkRelease, type InstalledApp, type Listing, type MeResponse,
   type PendingShare, type AuthPolicy, type SharePeerInfo, type ExposedBackend,
+  type BackendListing, type InstalledBackend,
 } from './api';
 
 /**
@@ -64,19 +65,23 @@ function Space() {
   */
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [backends, setBackends] = useState<ExposedBackend[]>([]);
+  /** 别人的后端：我从创意市场添加的。与 installed（页面）分开存，理由同上。 */
+  const [installedBackends, setInstalledBackends] = useState<InstalledBackend[]>([]);
   const [tab, setTab] = useState<TabKey>('pages');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const owner = ownerFromPath();
 
   const reloadApps = useCallback(async () => {
-    const [a, i, be] = await Promise.all([
+    const [a, i, be, ib] = await Promise.all([
       api.apps().catch(() => null),
       api.installed().catch(() => null),
       api.backends().catch(() => null),
+      api.installedBackends().catch(() => null),
     ]);
     if (i) setInstalled(i.installed);
     if (be) setBackends(be.backends.filter((b) => b.exposed));
+    if (ib) setInstalledBackends(ib.installed);
     if (!a) return;
     setApps(a.apps);
     setGroups(a.groups);
@@ -116,17 +121,19 @@ function Space() {
           location.replace(`/${m.user.username}/`);
           return;
         }
-        const [a, s, i, be] = await Promise.all([
+        const [a, s, i, be, ib] = await Promise.all([
           api.apps(),
           api.pendingShares().catch(() => ({ shares: [] })),
           api.installed().catch(() => ({ installed: [] })),
           api.backends().catch(() => ({ backends: [] as ExposedBackend[] })),
+          api.installedBackends().catch(() => ({ installed: [] as InstalledBackend[] })),
         ]);
         setApps(a.apps);
         setGroups(a.groups);
         setShares(s.shares);
         setInstalled(i.installed);
         setBackends(be.backends.filter((b) => b.exposed));
+        setInstalledBackends(ib.installed);
       } catch {
         setMe(null);
       } finally {
@@ -156,6 +163,7 @@ function Space() {
             groups={groups}
             installed={installed}
             backends={backends}
+            installedBackends={installedBackends}
             shares={shares}
             q={q}
             onShareResponded={(id) => setShares((prev) => prev.filter((s) => s.id !== id))}
@@ -550,11 +558,12 @@ function fmtLocalTime(iso: string): string {
 
 // ── 我的页面 ──────────────────────────────────────────────────────────
 function MyPages({
-  me, owner, apps, groups, installed, backends, shares, q, onShareResponded, reloadApps,
+  me, owner, apps, groups, installed, backends, installedBackends, shares, q, onShareResponded, reloadApps,
 }: {
   me: MeResponse; owner: string; apps: AppEntity[]; groups: AppGroup[];
   installed: InstalledApp[];
   backends: ExposedBackend[];
+  installedBackends: InstalledBackend[];
   shares: PendingShare[]; q: string; onShareResponded: (id: string) => void;
   reloadApps: () => Promise<void>;
 }) {
@@ -582,6 +591,12 @@ function MyPages({
       (a) => a.name.toLowerCase().includes(kw) || a.slug.toLowerCase().includes(kw),
     );
   }, [installed, q]);
+
+  const filteredInstalledBackends = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    if (!kw) return installedBackends;
+    return installedBackends.filter((b) => b.name.toLowerCase().includes(kw));
+  }, [installedBackends, q]);
 
   return (
     <>
@@ -627,6 +642,9 @@ function MyPages({
       )}
       {isOwner && filteredInstalled.length > 0 && (
         <InstalledSection items={filteredInstalled} onRemoved={reloadApps} />
+      )}
+      {isOwner && filteredInstalledBackends.length > 0 && (
+        <InstalledBackendSection items={filteredInstalledBackends} onRemoved={reloadApps} />
       )}
       <p style={{ marginTop: 'var(--space-20)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
         {c('oneline.scanNote')}
@@ -886,6 +904,85 @@ function InstalledSection({
   );
 }
 
+/**
+ * 同事的后端：我从创意市场添加的。
+ *
+ * 与 InstalledSection 同构，但没有 description/source——后端没有简介字段，
+ * 引用只有市场这一条来路（见 backend_installs 表那条注释）。状态展示按
+ * BackendSection 同样的口径折成二元 running/stopped：这是别人的服务，
+ * 装的人分不清"构建中"和"失败"能做什么不同的事，与其为一个分不出行动
+ * 差异的状态多加一档，不如跟同一屏里「我的后端」那张卡保持一致的简单。
+ */
+function InstalledBackendSection({
+  items, onRemoved,
+}: { items: InstalledBackend[]; onRemoved: () => Promise<void> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const remove = async (b: InstalledBackend) => {
+    setBusy(b.id); setErr(null);
+    try {
+      await api.removeInstalledBackend(b.id);
+      await onRemoved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <section style={{ marginBottom: 'var(--space-16)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)', marginBottom: 'var(--space-8)' }}>
+        <SectionLabel>同事的后端</SectionLabel>
+        <span className="num" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: -8 }}>
+          {items.length}
+        </span>
+      </div>
+      {err && (
+        <p role="alert" style={{ margin: '0 0 var(--space-6)', color: 'var(--error)', fontSize: 'var(--text-base)' }}>
+          {err}
+        </p>
+      )}
+      <div style={{
+        display: 'grid', gap: 'var(--space-8)',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+      }}>
+        {items.map((b) => {
+          const url = `/svc/${b.owner_username}/${b.name}/`;
+          const running = b.status === 'running';
+          return (
+            <Card key={b.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {b.has_cover && <CoverBanner src={`/deploy/api/backends/${b.id}/cover`} alt={b.name} />}
+              <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
+                {!b.has_cover && <AppIcon letter={b.name.slice(0, 1)} />}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <a href={url} style={{
+                    display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
+                    font: 'var(--weight-semibold) var(--text-card-title)/1.3 var(--font-sans)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{b.name}</a>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    {b.owner_name} 的后端 · 来自创意市场
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)', marginTop: 'auto' }}>
+                <StatusDot status={running ? 'running' : 'stopped'} label={running ? '运行中' : '已停止'} />
+                <div style={{ flex: 1 }} />
+                <Button size="sm" variant="ghost" disabled={busy === b.id}
+                  onClick={() => void remove(b)}>
+                  {busy === b.id ? '移除中…' : '从我这儿移除'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { location.href = url; }}>打开</Button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function AppCard({
   app, owner, onShare,
 }: { app: AppEntity; owner: string; onShare: (a: AppEntity) => void }) {
@@ -1071,21 +1168,45 @@ function EmptyState() {
  * 谁都能自助添加。添加只建立引用不复制内容——原作者更新，使用者下次
  * 打开就是新版；原作者下架，引用随之失效。
  */
+/**
+ * 市场里的一条条目：页面或后端。
+ *
+ * 两边字段形状差太多（见 marketplace.ts 那条"后端和页面的市场数据形状差
+ * 太多"的注释），不铸一个大而全的通用类型——直接 kind + 各自原样的字段，
+ * 通用字段（id/category/install_count/owner_name...）两边同名，union 上
+ * 直接读；kind 专属字段（app_id/slug、backend_id/has_cover 等）先判 kind
+ * 再读。
+ */
+type MarketItem = ({ kind: 'app' } & Listing) | ({ kind: 'backend' } & BackendListing);
+
 function Market({ isAdmin }: { isAdmin: boolean }) {
-  const [listings, setListings] = useState<Listing[]>([]);
+  const [items, setItems] = useState<MarketItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  /** 正在看提示词的那条 listing。null 表示弹窗关着。 */
+  /** 正在看提示词的那条 listing。null 表示弹窗关着。做同款只对页面成立。 */
   const [remix, setRemix] = useState<Listing | null>(null);
   const [msg, setMsg] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
-  /** 选中的分类，null=全部。本地搜索词。数据量是一个公司的共享页面，客户端过滤足够。 */
+  /** 选中的分类，null=全部。本地搜索词。数据量是一个公司的共享内容，客户端过滤足够。 */
   const [cat, setCat] = useState<string | null>(null);
   const [q, setQ] = useState('');
 
-  const load = () => void api.marketplace()
-    .then((r) => setListings(r.listings))
-    .catch(() => setListings([]))
-    .finally(() => setLoaded(true));
+  /*
+    两次请求各自失败不该互相拖累——后端市场接口出问题时，页面市场至少还能看。
+    合并后按安装数/发布时间重新排一遍：两条查询各自在服务端排过，但那只保证
+    各自有序，交错合并后整体顺序要在这里重新算。
+  */
+  const load = () => void Promise.all([
+    api.marketplace()
+      .then((r) => r.listings.map((l): MarketItem => ({ kind: 'app', ...l })))
+      .catch(() => [] as MarketItem[]),
+    api.backendMarketplace()
+      .then((r) => r.listings.map((b): MarketItem => ({ kind: 'backend', ...b })))
+      .catch(() => [] as MarketItem[]),
+  ]).then(([apps, backends]) => {
+    setItems([...apps, ...backends].sort((a, b) =>
+      b.install_count - a.install_count
+      || +new Date(b.published_at) - +new Date(a.published_at)));
+  }).finally(() => setLoaded(true));
   useEffect(load, []);
 
   /**
@@ -1097,48 +1218,58 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
    *
    * 只下架、不删应用——内容仍归作者，管理员该做的是收窄可见范围。
    */
-  const unlist = async (l: Listing) => {
+  const unlist = async (item: MarketItem) => {
+    const kindLabel = item.kind === 'app' ? '页面' : '后端';
     if (!confirm(
-      `把「${l.name}」从创意市场下架？\n\n`
-      + `作者是 ${l.owner_name}。页面本身和数据都保留，只是不再对全公司可见；`
+      `把「${item.name}」从创意市场下架？\n\n`
+      + `作者是 ${item.owner_name}。${kindLabel}本身和数据都保留，只是不再对全公司可见；`
       + '已添加过的同事会失去入口。作者可以自己重新上架。',
     )) return;
-    setBusy(l.app_id);
-    try { await api.adminUnlist(l.app_id); load(); }
-    finally { setBusy(null); }
+    setBusy(item.id);
+    try {
+      if (item.kind === 'app') await api.adminUnlist(item.app_id);
+      else await api.adminUnlistBackend(item.backend_id);
+      load();
+    } finally { setBusy(null); }
   };
 
-  const toggle = async (l: Listing) => {
-    setBusy(l.app_id);
+  const toggle = async (item: MarketItem) => {
+    setBusy(item.id);
     try {
-      if (l.installed) await api.uninstallFromMarket(l.app_id);
-      else await api.installFromMarket(l.app_id);
+      if (item.kind === 'app') {
+        if (item.installed) await api.uninstallFromMarket(item.app_id);
+        else await api.installFromMarket(item.app_id);
+      } else if (item.installed) {
+        await api.uninstallBackendFromMarket(item.backend_id);
+      } else {
+        await api.installBackendFromMarket(item.backend_id);
+      }
       load();
     } finally { setBusy(null); }
   };
 
   if (!loaded) return null;
 
-  if (listings.length === 0) {
+  if (items.length === 0) {
     return (
       <Card style={{ textAlign: 'center', padding: 'var(--space-24) var(--space-12)' }}>
         <div style={{ font: 'var(--weight-semibold) var(--text-lg)/1.4 var(--font-sans)' }}>
-          市场里还没有页面
+          市场里还没有内容
         </div>
         <p style={{ margin: 'var(--space-6) auto 0', maxWidth: 460, color: 'var(--text-secondary)' }}>
-          在控制台「我的页面」里点某个页面的「版本」，就能把它分享到全公司。
+          把一个页面或后端的可见范围改成「全公司」，就会出现在这里。
           上架后同事在这里添加即用，不需要你逐个发给他们。
         </p>
       </Card>
     );
   }
 
-  // 分类：AI 决定、可自造，未分类归「其他」。侧边栏按实际出现的分类聚合——
-  // 不再限定在固定清单里，AI 造的新分类也会自动成为一档。
-  const catOf = (l: Listing) => l.category?.trim() || '其他';
+  // 分类：AI 或作者决定、可自造，未分类归「其他」。侧边栏按实际出现的分类聚合——
+  // 不再限定在固定清单里，自造的新分类也会自动成为一档，页面和后端共用一套分类。
+  const catOf = (item: MarketItem) => item.category?.trim() || '其他';
   const counts = new Map<string, number>();
-  for (const l of listings) counts.set(catOf(l), (counts.get(catOf(l)) ?? 0) + 1);
-  // 排序：建议清单里的按清单顺序在前，AI 自造的按名称跟其后，「其他」永远垫底。
+  for (const item of items) counts.set(catOf(item), (counts.get(catOf(item)) ?? 0) + 1);
+  // 排序：建议清单里的按清单顺序在前，自造的按名称跟其后，「其他」永远垫底。
   const cats = [...counts.keys()].sort((a, b) => {
     if (a === '其他') return 1; if (b === '其他') return -1;
     const ia = (MARKETPLACE_CATEGORIES as readonly string[]).indexOf(a);
@@ -1149,10 +1280,11 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
   });
 
   const kw = q.trim().toLowerCase();
-  const visible = listings.filter((l) =>
-    (cat === null || catOf(l) === cat)
-    && (!kw || `${l.name} ${l.description ?? ''} ${l.owner_name}`.toLowerCase().includes(kw)),
-  );
+  const visible = items.filter((item) => {
+    const description = item.kind === 'app' ? item.description ?? '' : '';
+    return (cat === null || catOf(item) === cat)
+      && (!kw || `${item.name} ${description} ${item.owner_name}`.toLowerCase().includes(kw));
+  });
 
   return (
     <>
@@ -1162,7 +1294,7 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
           创意市场
         </h1>
         <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--text-base)' }}>
-          同事选择「分享到全公司」的页面都在这里，添加即用
+          同事选择「分享到全公司」的页面与后端都在这里，添加即用
         </p>
       </div>
 
@@ -1178,7 +1310,7 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
         <aside style={{ width: 168, flex: 'none', position: 'sticky', top: 72 }}>
           <SectionLabel>分类</SectionLabel>
           <div style={{ display: 'grid', gap: 2, marginTop: 'var(--space-6)' }}>
-            <CatItem label="全部" count={listings.length} on={cat === null} onClick={() => setCat(null)} />
+            <CatItem label="全部" count={items.length} on={cat === null} onClick={() => setCat(null)} />
             {cats.map((cName) => (
               <CatItem key={cName} label={cName} count={counts.get(cName) ?? 0}
                 on={cat === cName} onClick={() => setCat(cName)} />
@@ -1195,44 +1327,64 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
 
           {visible.length === 0 ? (
             <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-base)' }}>
-              {kw ? `没有匹配「${q}」的页面` : '这个分类下还没有页面'}
+              {kw ? `没有匹配「${q}」的内容` : '这个分类下还没有内容'}
             </p>
           ) : (
           <div style={{ display: 'grid', gap: 'var(--space-8)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-        {visible.map((l) => (
-          <Card key={l.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-            {l.cover_path && <CoverBanner src={l.cover_path} alt={l.name} />}
+        {visible.map((item) => {
+          const href = item.kind === 'app'
+            ? `/${item.owner_username}/${item.slug}/`
+            : `/svc/${item.owner_username}/${item.name}/`;
+          const coverSrc = item.kind === 'app'
+            ? item.cover_path
+            : (item.has_cover ? `/deploy/api/backends/${item.backend_id}/cover` : null);
+          const iconLetter = item.kind === 'app' ? item.icon_letter : item.name.slice(0, 1);
+          return (
+          <Card key={item.id} hoverable style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+            {coverSrc && <CoverBanner src={coverSrc} alt={item.name} />}
             <div style={{ display: 'flex', gap: 'var(--space-8)', alignItems: 'flex-start' }}>
-              {!l.cover_path && <AppIcon letter={l.icon_letter} />}
+              {!coverSrc && <AppIcon letter={iconLetter} />}
               <div style={{ minWidth: 0, flex: 1 }}>
-                <a href={`/${l.owner_username}/${l.slug}/`} style={{
+                <a href={href} style={{
                   display: 'block', textDecoration: 'none', color: 'var(--text-heading)',
                   font: 'var(--weight-semibold) var(--text-card-title)/1.3 var(--font-sans)',
-                }}>{l.name}</a>
+                }}>{item.name}</a>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {l.owner_name} · <span className="num">{l.install_count}</span> 人在用
+                  {item.owner_name} · <span className="num">{item.install_count}</span> 人在用
+                  {item.kind === 'backend' && ' · 后端'}
                 </div>
               </div>
             </div>
-            {l.description && (
+            {item.kind === 'app' && item.description && (
               <p style={{
                 margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)',
                 display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-              }}>{l.description}</p>
+              }}>{item.description}</p>
             )}
             <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--space-5)' }}>
-              {l.mine ? (
+              {item.mine ? (
                 <>
                   <Badge tone="brand">你发布的</Badge>
-                  {/* 作者就地改分类。可输入的组合框（不是固定下拉）——分类现在由 AI
-                      决定、可自造，作者也该能填清单外的词；datalist 给建议 + 已有分类。 */}
+                  {/* 作者就地改分类。可输入的组合框（不是固定下拉）——分类由 AI 或
+                      作者决定、可自造，也该能填清单外的词；datalist 给建议 + 已有分类。
+                      浏览器的 <input list> 弹出建议时按「当前文本」做子串过滤——
+                      defaultValue 一开始就填着现有分类，点进去就只剩它自己一条匹配，
+                      等于看不到其它分类可选。onFocus 先清空腾出一个「空文本」，
+                      建议列表才会把全部选项摆出来；onBlur 如果什么都没选/没打，
+                      把原值还回去，不然卡片上的分类会变成空白。 */}
                   <input
-                    defaultValue={l.category ?? ''}
+                    defaultValue={item.category ?? ''}
                     list="ispace-market-cats"
                     placeholder="分类"
+                    onFocus={(e) => { e.target.value = ''; }}
                     onBlur={(e) => {
                       const v = e.target.value.trim();
-                      if (v && v !== (l.category ?? '')) void api.setListingCategory(l.app_id, v).then(load);
+                      if (!v) { e.target.value = item.category ?? ''; return; }
+                      if (v === (item.category ?? '')) return;
+                      const save = item.kind === 'app'
+                        ? api.setListingCategory(item.app_id, v)
+                        : api.setBackendListingCategory(item.backend_id, v);
+                      void save.then(load);
                     }}
                     style={{
                       width: 96, height: 28, padding: '0 var(--space-5)',
@@ -1242,32 +1394,33 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
                   />
                 </>
               ) : (
-                <Button size="sm" variant={l.installed ? 'ghost' : 'primary'}
-                  disabled={busy === l.app_id} onClick={() => void toggle(l)}>
-                  {l.installed ? '已添加，点此移除' : '添加到我的'}
+                <Button size="sm" variant={item.installed ? 'ghost' : 'primary'}
+                  disabled={busy === item.id} onClick={() => void toggle(item)}>
+                  {item.installed ? '已添加，点此移除' : '添加到我的'}
                 </Button>
               )}
               {/*
-                「做同款」只在真有提示词时才出现。
-                没有的页面**不显示灰按钮**——一个点不动的入口只会引出
-                "为什么我这个不行"，而答案（作者当初没经 AI 发布）
-                跟看的人一点关系都没有。
+                「做同款」只在真有提示词的页面上出现，后端没有这个概念
+                （不是"缺了提示词"，是活容器本来就没法照抄成另一份）。
+                没有的条目**不显示灰按钮**——一个点不动的入口只会引出
+                "为什么我这个不行"，而答案跟看的人一点关系都没有。
               */}
-              {l.source_prompt && (
-                <Button size="sm" variant="ghost" onClick={() => setRemix(l)}>
+              {item.kind === 'app' && item.source_prompt && (
+                <Button size="sm" variant="ghost" onClick={() => { if (item.kind === 'app') setRemix(item); }}>
                   做同款
                 </Button>
               )}
               {/* 管理员才看得到。别人上架的才需要——自己的走上面那条正常路径 */}
-              {isAdmin && !l.mine && (
-                <Button size="sm" variant="ghost" disabled={busy === l.app_id}
-                  onClick={() => void unlist(l)}>
+              {isAdmin && !item.mine && (
+                <Button size="sm" variant="ghost" disabled={busy === item.id}
+                  onClick={() => void unlist(item)}>
                   下架
                 </Button>
               )}
             </div>
           </Card>
-        ))}
+          );
+        })}
           </div>
           )}
         </div>

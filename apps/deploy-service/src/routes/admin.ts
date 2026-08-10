@@ -459,6 +459,37 @@ export function registerAdminRoutes(
     return { ok: true };
   });
 
+  // ── 创意市场：管理员下架（后端）────────────────────────────────────
+  // 与上面页面那条同构，只是落到 backends / backend_installs / backend_shares。
+  app.delete(`${API_BASE}/admin/marketplace/backends/:backendId`, async (req) => {
+    const admin = await requireAdmin(req);
+    const { backendId } = req.params as { backendId: string };
+
+    const [row] = await sql<{ name: string; username: string }[]>`
+      DELETE FROM ispace.marketplace_listings m
+       USING ispace.backends b, ispace.users u
+       WHERE m.backend_id = b.id AND b.owner_id = u.id AND m.backend_id = ${backendId}
+      RETURNING b.name, u.username
+    `;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '这个后端不在市场里');
+
+    await sql`DELETE FROM ispace.backend_installs WHERE backend_id = ${backendId}`;
+    // 还有点对点分享的话保留 shared，否则退回 private
+    await sql`
+      UPDATE ispace.backends SET visibility = CASE
+        WHEN EXISTS (SELECT 1 FROM ispace.backend_shares s WHERE s.backend_id = ${backendId})
+        THEN 'shared' ELSE 'private' END
+       WHERE id = ${backendId}
+    `;
+    await writeAudit(sql, {
+      actorId: admin.id, action: 'backend.update', targetType: 'backend', targetId: backendId,
+      source: 'console', result: 'success',
+      metadata: { unlistedByAdmin: true, name: row.name, owner: row.username },
+      ip: req.ip,
+    });
+    return { ok: true };
+  });
+
   // ── 阻断复核 ──────────────────────────────────────────────────────
   /**
    * 被密钥扫描拦下的发布。

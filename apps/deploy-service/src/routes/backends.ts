@@ -113,6 +113,23 @@ export function registerBackendRoutes(
     const rows = await sql`SELECT * FROM ispace.backends WHERE id = ${id} AND owner_id = ${me.id}`;
     if (!rows[0]) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端，或它不属于你。');
 
+    /*
+      平台可以关掉某一档共享——挡在服务端而不是只在界面上隐藏，直接调接口的
+      照样能设。页面那边（shares.ts）已经这么做了，后端这条路由之前漏掉了：
+      漏掉的后果本来只是"策略关了但后端还能被越权设成全公司"，现在给后端接
+      创意市场之后，同一个漏洞会让越权设置的后端被公司里所有人看到、装走，
+      影响面大了一截，所以跟着补上。「仅自己」永远允许，那是收紧。
+    */
+    if (input.visibility === 'public' || input.visibility === 'shared') {
+      const policy = await getPlatformPolicy(sql);
+      if (input.visibility === 'public' && !policy.allowPublicShare) {
+        throw new IspaceError(ERROR_CODES.FORBIDDEN, '平台已关闭「全公司」共享，请改用「指定同事」。');
+      }
+      if (input.visibility === 'shared' && !policy.allowPeerShare) {
+        throw new IspaceError(ERROR_CODES.FORBIDDEN, '平台已关闭点对点分享。');
+      }
+    }
+
     const updated = await sql`
       UPDATE ispace.backends
          SET exposed    = ${input.exposed ?? (rows[0] as { exposed: boolean }).exposed},
@@ -120,6 +137,26 @@ export function registerBackendRoutes(
        WHERE id = ${id}
       RETURNING *
     `;
+
+    /*
+      可见范围变了就跟着改市场上架状态——与页面（shares.ts 的
+      PATCH /apps/:appId/visibility）同一套语义：
+        public         上架（幂等，重复设为 public 只刷新 published_at）
+        shared/private 下架，并清掉别人经市场"添加到我的"留下的引用，
+                       否则对方列表里留着一个不该再看见的入口
+      只在这次请求真的带了 visibility 时才动——纯改 exposed 不该动市场状态。
+    */
+    if (input.visibility === 'public') {
+      await sql`
+        INSERT INTO ispace.marketplace_listings (backend_id, published_by)
+        VALUES (${id}, ${me.id})
+        ON CONFLICT (backend_id) DO UPDATE SET published_at = now()
+      `;
+    } else if (input.visibility !== undefined) {
+      await sql`DELETE FROM ispace.marketplace_listings WHERE backend_id = ${id}`;
+      await sql`DELETE FROM ispace.backend_installs WHERE backend_id = ${id}`;
+    }
+
     // 露出后台截一张封面（best-effort，不 await）。容器在 dokploy-network 上按
     // 服务名可达；stirling 这类带 context-path 的后端在 url_path 下服务，所以
     // 截 http://{container}:{port}{url_path}/。

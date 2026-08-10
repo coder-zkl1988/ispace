@@ -194,4 +194,112 @@ export function registerMarketplaceRoutes(
     `;
     return { installed: rows };
   });
+
+  /*
+   * ── 后端的市场列表 / 安装 / 分类 ─────────────────────────────────────
+   *
+   * 后端和页面在市场里的数据形状差太多（没有 slug/type/source_prompt，
+   * 封面存 bytea 不是 URL），与其在一条查询里 UNION 再对齐两边的列类型，
+   * 不如单开一组端点——门户把两次请求的结果在客户端拼成一个列表渲染，
+   * 分类侧边栏、搜索、排序都在那一层统一算。
+   */
+
+  // ── 市场列表（后端）──────────────────────────────────────────────────
+  app.get(`${API_BASE}/marketplace/backends`, async (req) => {
+    const me = await requireAuth(req);
+    const rows = await sql`
+      SELECT m.id, m.backend_id, m.published_at, m.install_count,
+             b.category, b.name, b.status, (b.cover IS NOT NULL) AS has_cover,
+             u.username AS owner_username, u.display_name AS owner_name,
+             EXISTS (
+               SELECT 1 FROM ispace.backend_installs i
+                WHERE i.backend_id = m.backend_id AND i.user_id = ${me.id}
+             ) AS installed,
+             (b.owner_id = ${me.id}) AS mine
+        FROM ispace.marketplace_listings m
+        JOIN ispace.backends b ON b.id = m.backend_id
+        JOIN ispace.users   u ON u.id = b.owner_id
+       WHERE b.status <> 'stopped'
+       ORDER BY m.install_count DESC, m.published_at DESC
+    `;
+    return { listings: rows };
+  });
+
+  // ── 改分类（后端）────────────────────────────────────────────────────
+  app.patch(`${API_BASE}/marketplace/backends/:backendId/category`, async (req) => {
+    const me = await requireAuth(req);
+    const { backendId } = req.params as { backendId: string };
+    const { category } = z.object({ category: marketplaceCategorySchema }).parse(req.body);
+    const owned = await sql`SELECT 1 FROM ispace.backends WHERE id = ${backendId} AND owner_id = ${me.id}`;
+    if (!owned[0]) throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能改自己的后端。');
+    await sql`UPDATE ispace.backends SET category = ${category} WHERE id = ${backendId}`;
+    return { ok: true };
+  });
+
+  // ── 添加到我的（后端）────────────────────────────────────────────────
+  app.post(`${API_BASE}/marketplace/backends/:backendId/install`, async (req) => {
+    const me = await requireAuth(req);
+    const { backendId } = req.params as { backendId: string };
+
+    const listed = await sql`
+      SELECT 1 FROM ispace.marketplace_listings WHERE backend_id = ${backendId}
+    `;
+    if (!listed.length) throw new IspaceError(ERROR_CODES.NOT_FOUND, '这个后端已不在市场里');
+
+    await sql`
+      INSERT INTO ispace.backend_installs (backend_id, user_id)
+      VALUES (${backendId}, ${me.id})
+      ON CONFLICT (backend_id, user_id) DO NOTHING
+    `;
+    await sql`
+      UPDATE ispace.marketplace_listings m
+         SET install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = m.backend_id)
+       WHERE m.backend_id = ${backendId}
+    `;
+    return { ok: true };
+  });
+
+  app.delete(`${API_BASE}/marketplace/backends/:backendId/install`, async (req) => {
+    const me = await requireAuth(req);
+    const { backendId } = req.params as { backendId: string };
+    await sql`
+      DELETE FROM ispace.backend_installs
+       WHERE backend_id = ${backendId} AND user_id = ${me.id}
+    `;
+    await sql`
+      UPDATE ispace.marketplace_listings m
+         SET install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = m.backend_id)
+       WHERE m.backend_id = ${backendId}
+    `;
+    return { ok: true };
+  });
+
+  // ── 我添加过的后端（聚合页「已安装」区用）────────────────────────────
+  app.get(`${API_BASE}/installed/backends`, async (req) => {
+    const me = await requireAuth(req);
+    const rows = await sql`
+      SELECT b.id, b.name, b.status, b.url_path, (b.cover IS NOT NULL) AS has_cover,
+             u.username AS owner_username, u.display_name AS owner_name
+        FROM ispace.backend_installs i
+        JOIN ispace.backends b ON b.id = i.backend_id
+        JOIN ispace.users   u ON u.id = b.owner_id
+       WHERE i.user_id = ${me.id}
+       ORDER BY i.created_at DESC
+    `;
+    return { installed: rows };
+  });
+
+  app.delete(`${API_BASE}/installed/backends/:backendId`, async (req) => {
+    const me = await requireAuth(req);
+    const { backendId } = req.params as { backendId: string };
+    await sql`
+      DELETE FROM ispace.backend_installs WHERE backend_id = ${backendId} AND user_id = ${me.id}
+    `;
+    await sql`
+      UPDATE ispace.marketplace_listings m
+         SET install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = m.backend_id)
+       WHERE m.backend_id = ${backendId}
+    `;
+    return { ok: true };
+  });
 }
