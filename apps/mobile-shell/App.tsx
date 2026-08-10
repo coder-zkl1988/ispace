@@ -156,19 +156,25 @@ function Root() {
   }, []);
 
   /**
-   * 拉这个人在电脑上做的页面，以及从市场装的别人的页面。
+   * 拉这个人在电脑上做的页面/后端，以及从市场装的别人的页面/后端。
    *
    * 手机端不重新实现一套"我有哪些页面"的判断——服务端已经知道了，
    * 两端各判一次迟早会不一致。
+   *
+   * 后端（露出的全栈应用）与页面在启动器里一视同仁地并排——它们都是
+   * kind:'web'，打开方式同样是 WebView 打开一个地址（/svc/{user}/{name}/
+   * 而不是 /{user}/{slug}/），Launcher/Tile 那层不需要为此新增分支。
    */
   const loadWebApps = useCallback(async () => {
     if (!token) return;
     setLoadingApps(true);
     const auth = { authorization: `Bearer ${token}` };
     try {
-      const [mineRes, instRes] = await Promise.all([
+      const [mineRes, instRes, bkRes, instBkRes] = await Promise.all([
         fetch(`${API_BASE}/deploy/api/apps`, { headers: auth }),
         fetch(`${API_BASE}/deploy/api/installed`, { headers: auth }),
+        fetch(`${API_BASE}/deploy/api/backends`, { headers: auth }),
+        fetch(`${API_BASE}/deploy/api/installed/backends`, { headers: auth }),
       ]);
       const items: LaunchItem[] = [];
       if (mineRes.ok) {
@@ -195,6 +201,29 @@ function Root() {
           items.push({
             kind: 'web', key: `inst:${a.id}`, name: a.name, letter: a.icon_letter,
             path: `/${a.owner_username}/${a.slug}/`, owner: a.owner_name,
+          });
+        }
+      }
+      if (bkRes.ok) {
+        const { backends } = (await bkRes.json()) as {
+          backends: { id: string; name: string; exposed: boolean }[];
+        };
+        for (const b of backends) {
+          if (!b.exposed) continue;
+          items.push({
+            kind: 'web', key: `bk:${b.id}`, name: b.name, letter: b.name.slice(0, 1),
+            path: `/svc/${me?.user.username ?? ''}/${b.name}/`,
+          });
+        }
+      }
+      if (instBkRes.ok) {
+        const { installed } = (await instBkRes.json()) as {
+          installed: { id: string; name: string; owner_username: string; owner_name: string }[];
+        };
+        for (const b of installed) {
+          items.push({
+            kind: 'web', key: `instbk:${b.id}`, name: b.name, letter: b.name.slice(0, 1),
+            path: `/svc/${b.owner_username}/${b.name}/`, owner: b.owner_name,
           });
         }
       }

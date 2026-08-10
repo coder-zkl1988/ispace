@@ -9,12 +9,18 @@ import { API_BASE } from '../config';
 /**
  * 手机上的创意市场。
  *
- * 与电脑端同一份数据（/deploy/api/marketplace），但手机上做的事更少：
- * 浏览、装到自己的启动器、看「做同款」的提示词。上架与下架仍只在电脑端
- * ——那是需要斟酌措辞的动作，不适合在通勤路上点。
+ * 与电脑端同一份数据，但手机上做的事更少：浏览、装到自己的启动器、看
+ * 「做同款」的提示词。上架与下架、改分类仍只在电脑端——那些是需要斟酌
+ * 措辞或来回比对的动作，不适合在通勤路上点。
+ *
+ * 页面和后端是两条独立请求（/marketplace、/marketplace/backends）而不是
+ * 一条：两边数据形状差太多（后端没有 slug/type/source_prompt），服务端
+ * 那边也是分开的两组端点（见 deploy-service marketplace.ts 的注释）。
+ * 这里在客户端把结果拼成一个列表渲染，卡片样式两者共用同一份，
+ * 只在装/卸、要不要出「做同款」这些地方按 kind 分岔。
  */
 
-export interface Listing {
+export interface AppListing {
   id: string; app_id: string; slug: string; name: string;
   description: string | null; icon_letter: string; type: string;
   owner_username: string; owner_name: string;
@@ -22,25 +28,43 @@ export interface Listing {
   source_prompt: string | null;
 }
 
+export interface BackendListing {
+  id: string; backend_id: string; name: string; status: string;
+  owner_username: string; owner_name: string;
+  install_count: number; installed: boolean; mine: boolean;
+}
+
+type MarketItem = ({ kind: 'app' } & AppListing) | ({ kind: 'backend' } & BackendListing);
+
 export function Market({ token, onChanged }: {
   token: string | null;
   onChanged: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [listings, setListings] = useState<Listing[]>([]);
+  const [items, setItems] = useState<MarketItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [openPrompt, setOpenPrompt] = useState<Listing | null>(null);
+  const [openPrompt, setOpenPrompt] = useState<AppListing | null>(null);
 
   const auth = token ? { authorization: `Bearer ${token}` } : undefined;
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const res = await fetch(`${API_BASE}/deploy/api/marketplace`, { headers: auth });
-      if (!res.ok) throw new Error('市场加载失败');
-      setListings(((await res.json()) as { listings: Listing[] }).listings);
+      // 两条请求各自失败不该互相拖累——后端市场接口出问题时，页面市场至少还能看。
+      const [apps, backends] = await Promise.all([
+        fetch(`${API_BASE}/deploy/api/marketplace`, { headers: auth })
+          .then((r) => (r.ok ? (r.json() as Promise<{ listings: AppListing[] }>) : { listings: [] }))
+          .then((r) => r.listings.map((l): MarketItem => ({ kind: 'app', ...l })))
+          .catch(() => [] as MarketItem[]),
+        fetch(`${API_BASE}/deploy/api/marketplace/backends`, { headers: auth })
+          .then((r) => (r.ok ? (r.json() as Promise<{ listings: BackendListing[] }>) : { listings: [] }))
+          .then((r) => r.listings.map((b): MarketItem => ({ kind: 'backend', ...b })))
+          .catch(() => [] as MarketItem[]),
+      ]);
+      if (apps.length === 0 && backends.length === 0) throw new Error('市场加载失败');
+      setItems([...apps, ...backends].sort((a, b) => b.install_count - a.install_count));
     } catch (e) {
       setErr(e instanceof Error ? e.message : '网络不可用');
     } finally { setLoading(false); }
@@ -48,24 +72,22 @@ export function Market({ token, onChanged }: {
 
   useEffect(() => { void load(); }, [load]);
 
-  const toggleInstall = async (l: Listing) => {
-    setBusy(l.app_id); setErr(null);
+  const toggleInstall = async (item: MarketItem) => {
+    setBusy(item.id); setErr(null);
     try {
       /*
-        移除走 /installed/:appId 而不是市场那个卸载端点：后者带
+        移除走 /installed/... 而不是市场那个卸载端点：后者带
         source='marketplace' 过滤，删不掉同事分享来的。对用户而言
         两者都是「我这儿不要它了」，没必要分。
       */
-      const res = l.installed
-        ? await fetch(`${API_BASE}/deploy/api/installed/${l.app_id}`, {
-            method: 'DELETE', headers: auth,
-          })
-        : await fetch(`${API_BASE}/deploy/api/marketplace/${l.app_id}/install`, {
-            method: 'POST', headers: auth,
-          });
-      if (!res.ok) throw new Error(l.installed ? '移除失败' : '安装失败');
-      setListings((xs) => xs.map((x) =>
-        x.app_id === l.app_id ? { ...x, installed: !x.installed } : x));
+      const path = item.kind === 'app'
+        ? (item.installed ? `/installed/${item.app_id}` : `/marketplace/${item.app_id}/install`)
+        : (item.installed ? `/installed/backends/${item.backend_id}` : `/marketplace/backends/${item.backend_id}/install`);
+      const res = await fetch(`${API_BASE}/deploy/api${path}`, {
+        method: item.installed ? 'DELETE' : 'POST', headers: auth,
+      });
+      if (!res.ok) throw new Error(item.installed ? '移除失败' : '安装失败');
+      setItems((xs) => xs.map((x) => (x.id === item.id ? { ...x, installed: !x.installed } : x)));
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : '操作失败');
@@ -85,44 +107,52 @@ export function Market({ token, onChanged }: {
         contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor="#fb923c" />}
       >
-        {!loading && listings.length === 0 && (
-          <Text style={s.empty}>还没有人上架页面。第一个来的人会被所有人看到。</Text>
+        {!loading && items.length === 0 && (
+          <Text style={s.empty}>还没有人上架内容。第一个来的人会被所有人看到。</Text>
         )}
 
-        {listings.map((l) => (
-          <View key={l.id} style={s.card}>
+        {items.map((item) => {
+          const letter = item.kind === 'app' ? item.icon_letter : item.name.slice(0, 1);
+          return (
+          <View key={item.id} style={s.card}>
             <View style={s.cardHead}>
-              <View style={s.icon}><Text style={s.iconText}>{l.icon_letter}</Text></View>
+              <View style={s.icon}><Text style={s.iconText}>{letter}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={s.name} numberOfLines={1}>{l.name}</Text>
+                <Text style={s.name} numberOfLines={1}>{item.name}</Text>
                 <Text style={s.meta} numberOfLines={1}>
-                  {l.owner_name} · {l.install_count} 人在用{l.mine ? ' · 我做的' : ''}
+                  {item.owner_name} · {item.install_count} 人在用
+                  {item.kind === 'backend' ? ' · 后端' : ''}
+                  {item.mine ? ' · 我做的' : ''}
                 </Text>
               </View>
             </View>
 
-            {l.description && <Text style={s.desc} numberOfLines={3}>{l.description}</Text>}
+            {item.kind === 'app' && item.description && (
+              <Text style={s.desc} numberOfLines={3}>{item.description}</Text>
+            )}
 
             <View style={s.actions}>
-              {!l.mine && (
+              {!item.mine && (
                 <Pressable
-                  style={[s.btn, l.installed ? s.btnGhost : s.btnPrimary]}
-                  onPress={() => void toggleInstall(l)}
-                  disabled={busy === l.app_id}
+                  style={[s.btn, item.installed ? s.btnGhost : s.btnPrimary]}
+                  onPress={() => void toggleInstall(item)}
+                  disabled={busy === item.id}
                 >
-                  <Text style={[s.btnText, l.installed ? s.btnGhostText : s.btnPrimaryText]}>
-                    {busy === l.app_id ? '…' : l.installed ? '已装 · 移除' : '装到我这儿'}
+                  <Text style={[s.btnText, item.installed ? s.btnGhostText : s.btnPrimaryText]}>
+                    {busy === item.id ? '…' : item.installed ? '已装 · 移除' : '装到我这儿'}
                   </Text>
                 </Pressable>
               )}
-              {l.source_prompt && (
-                <Pressable style={[s.btn, s.btnGhost]} onPress={() => setOpenPrompt(l)}>
+              {/* 做同款只对页面成立——后端是活容器，没法照抄成另一份 */}
+              {item.kind === 'app' && item.source_prompt && (
+                <Pressable style={[s.btn, s.btnGhost]} onPress={() => { if (item.kind === 'app') setOpenPrompt(item); }}>
                   <Text style={[s.btnText, s.btnGhostText]}>做同款</Text>
                 </Pressable>
               )}
             </View>
           </View>
-        ))}
+          );
+        })}
       </ScrollView>
 
       {openPrompt && (
@@ -139,7 +169,7 @@ export function Market({ token, onChanged }: {
  * runtimeVersion），所以用系统分享面板——用户可以直接发到自己和
  * AI 的对话里，比复制粘贴还少一步。
  */
-function PromptSheet({ listing, onClose }: { listing: Listing; onClose: () => void }) {
+function PromptSheet({ listing, onClose }: { listing: AppListing; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const prompt = listing.source_prompt ?? '';
   return (
