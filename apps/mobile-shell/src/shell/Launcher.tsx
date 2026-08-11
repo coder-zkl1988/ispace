@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Animated, Easing, Pressable, RefreshControl,
+  ActivityIndicator, Animated, Easing, Image, Pressable, RefreshControl,
   ScrollView, StyleSheet, Text, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export type LaunchItem =
   | { kind: 'screen'; key: string; route: string; name: string; letter: string }
-  | { kind: 'web'; key: string; path: string; name: string; letter: string; owner?: string }
+  | { kind: 'web'; key: string; path: string; name: string; letter: string; owner?: string; cover?: string | null }
   | { kind: 'market'; key: 'market'; name: string; letter: string };
 
 export function Launcher({
@@ -187,7 +187,7 @@ function Grid({ items, onOpen, onLongPress, homeKey }: {
 }
 
 /**
- * 图标依次浮起。
+ * 卡片依次浮起。
  *
  * 逐个入场而不是整屏一起出现：一起出现时用户不知道该先看哪，
  * 错开 45ms 之后视线会自然地从第一个扫到最后一个。
@@ -198,6 +198,8 @@ function Tile({ item, index, onPress, onLongPress, isHome }: {
 }) {
   const appear = useRef(new Animated.Value(0)).current;
   const press = useRef(new Animated.Value(0)).current;
+  // 页面/后端才可能有封面；页面包里的屏（RN，本机资源）没有这个概念
+  const cover = item.kind === 'web' ? item.cover : undefined;
 
   useEffect(() => {
     Animated.timing(appear, {
@@ -213,6 +215,7 @@ function Tile({ item, index, onPress, onLongPress, isHome }: {
 
   return (
     <Animated.View style={{
+      width: '47%',
       opacity: appear,
       transform: [{ scale }, { translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
     }}>
@@ -221,15 +224,21 @@ function Tile({ item, index, onPress, onLongPress, isHome }: {
         {...(onLongPress ? { onLongPress, delayLongPress: 380 } : {})}
         onPressIn={() => Animated.spring(press, { toValue: 1, useNativeDriver: true, speed: 40 }).start()}
         onPressOut={() => Animated.spring(press, { toValue: 0, useNativeDriver: true, speed: 24 }).start()}
-        style={s.tile}
+        style={s.card}
       >
-        <View style={[s.tileIcon, item.kind === 'screen' && { backgroundColor: '#001217' }]}>
-          <Text style={s.tileLetter}>{item.letter}</Text>
+        <View style={[s.cover, item.kind === 'screen' && { backgroundColor: '#001217' }]}>
+          {cover ? (
+            <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <Text style={s.coverLetter}>{item.letter}</Text>
+          )}
           {isHome && <View style={s.homeDot}><Text style={s.homeDotText}>首</Text></View>}
         </View>
-        <Text style={s.tileName} numberOfLines={2}>{item.name}</Text>
+        <Text style={s.cardName} numberOfLines={1}>{item.name}</Text>
         {item.kind === 'web' && (
-          <Text style={s.tileBadge}>{isHome ? '首页' : onLongPress ? '长按更多' : '需联网'}</Text>
+          <Text style={s.cardBadge}>
+            {isHome ? '首页' : item.owner ? item.owner : onLongPress ? '长按更多' : '需联网'}
+          </Text>
         )}
       </Pressable>
     </Animated.View>
@@ -245,36 +254,38 @@ export function LauncherLoading() {
   );
 }
 
-const TILE = 78;
-
 const s = StyleSheet.create({
   helloSub: { fontSize: 12.5, color: '#909599', marginBottom: 16 },
   groupTitle: {
     fontSize: 13, fontWeight: '700', color: '#545659',
     marginTop: 26, marginBottom: 12, letterSpacing: 1,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tile: { width: TILE + 18, alignItems: 'center', paddingVertical: 10 },
-  tileIcon: {
-    width: TILE - 12, height: TILE - 12, borderRadius: 18,
+  // 两列卡片：宽度按百分比切（Tile 自己定 47%），行内用 gap 分开——
+  // 47% + 47% 留出的缝正好落在 gap 附近，肉眼看不出偏差。
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  card: { paddingBottom: 4 },
+  // 封面区：有封面显示封面图，没有就退回原来那套"色块+首字母"，
+  // 铺满整个区域而不是居中一个小方块——原先的小图标在这么大的区域里
+  // 会显得空落落的。
+  cover: {
+    aspectRatio: 1.5, borderRadius: 16, overflow: 'hidden',
     backgroundColor: '#fb923c', alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
-  tileLetter: { color: '#fff', fontSize: 26, fontWeight: '700' },
-  tileName: {
-    marginTop: 8, fontSize: 12, color: '#001217',
-    textAlign: 'center', lineHeight: 16,
+  coverLetter: { color: '#fff', fontSize: 34, fontWeight: '700' },
+  cardName: {
+    marginTop: 8, fontSize: 13.5, fontWeight: '600', color: '#001217', lineHeight: 18,
   },
-  tileBadge: { fontSize: 9.5, color: '#909599', marginTop: 2 },
-  // 首页标记贴在图标右上角：一眼能看出"打开 App 落在哪儿"
+  cardBadge: { fontSize: 11, color: '#909599', marginTop: 1 },
+  // 首页标记贴在封面右上角：一眼能看出"打开 App 落在哪儿"
   homeDot: {
-    position: 'absolute', top: -4, right: -4,
-    width: 20, height: 20, borderRadius: 10, backgroundColor: '#001217',
+    position: 'absolute', top: 8, right: 8,
+    width: 22, height: 22, borderRadius: 11, backgroundColor: '#001217',
     borderWidth: 2, borderColor: '#fcfcf8',
     alignItems: 'center', justifyContent: 'center',
   },
-  homeDotText: { color: '#fff', fontSize: 9, fontWeight: '700' },
+  homeDotText: { color: '#fff', fontSize: 9.5, fontWeight: '700' },
 
   sheetMask: {
     ...StyleSheet.absoluteFillObject, zIndex: 40,

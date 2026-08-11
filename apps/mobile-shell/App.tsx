@@ -156,6 +156,16 @@ function Root() {
   }, []);
 
   /**
+   * 页面封面存的是站内相对路径（如 /zongkelong/gugong-yiri/cover.png）——
+   * 网页端 <img> 靠浏览器同源自动补全域名，portal 那边直接拿来用就行。
+   * 手机端的 Image 组件没有"当前页面源"这个概念，相对路径等于加载不出来，
+   * 得自己补上 API_BASE。已经是完整 URL（页面自己声明了外部图床）的
+   * 不重复加前缀。
+   */
+  const absCover = (u: string | null): string | null =>
+    !u ? null : /^https?:\/\//.test(u) ? u : `${API_BASE}${u}`;
+
+  /**
    * 拉这个人在电脑上做的页面/后端，以及从市场装的别人的页面/后端。
    *
    * 手机端不重新实现一套"我有哪些页面"的判断——服务端已经知道了，
@@ -179,14 +189,15 @@ function Root() {
       const items: LaunchItem[] = [];
       if (mineRes.ok) {
         const { apps } = (await mineRes.json()) as {
-          apps: { id: string; slug: string; name: string; iconLetter: string; status: string }[];
+          apps: { id: string; slug: string; name: string; iconLetter: string; status: string;
+                  coverUrl: string | null }[];
         };
         const mine: EditTarget[] = [];
         for (const a of apps) {
           if (a.status === 'stopped') continue;
           items.push({
             kind: 'web', key: `mine:${a.id}`, name: a.name, letter: a.iconLetter,
-            path: `/${me?.user.username ?? ''}/${a.slug}/`,
+            path: `/${me?.user.username ?? ''}/${a.slug}/`, cover: absCover(a.coverUrl),
           });
           mine.push({ slug: a.slug, name: a.name, letter: a.iconLetter });
         }
@@ -195,35 +206,38 @@ function Root() {
       if (instRes.ok) {
         const { installed } = (await instRes.json()) as {
           installed: { id: string; slug: string; name: string; icon_letter: string;
-                       owner_username: string; owner_name: string }[];
+                       owner_username: string; owner_name: string; cover_path: string | null }[];
         };
         for (const a of installed) {
           items.push({
             kind: 'web', key: `inst:${a.id}`, name: a.name, letter: a.icon_letter,
-            path: `/${a.owner_username}/${a.slug}/`, owner: a.owner_name,
+            path: `/${a.owner_username}/${a.slug}/`, owner: a.owner_name, cover: absCover(a.cover_path),
           });
         }
       }
       if (bkRes.ok) {
         const { backends } = (await bkRes.json()) as {
-          backends: { id: string; name: string; exposed: boolean }[];
+          backends: { id: string; name: string; exposed: boolean; hasCover: boolean }[];
         };
         for (const b of backends) {
           if (!b.exposed) continue;
           items.push({
             kind: 'web', key: `bk:${b.id}`, name: b.name, letter: b.name.slice(0, 1),
             path: `/svc/${me?.user.username ?? ''}/${b.name}/`,
+            cover: b.hasCover ? `${API_BASE}/deploy/api/backends/${b.id}/cover` : null,
           });
         }
       }
       if (instBkRes.ok) {
         const { installed } = (await instBkRes.json()) as {
-          installed: { id: string; name: string; owner_username: string; owner_name: string }[];
+          installed: { id: string; name: string; owner_username: string; owner_name: string;
+                       has_cover: boolean }[];
         };
         for (const b of installed) {
           items.push({
             kind: 'web', key: `instbk:${b.id}`, name: b.name, letter: b.name.slice(0, 1),
             path: `/svc/${b.owner_username}/${b.name}/`, owner: b.owner_name,
+            cover: b.has_cover ? `${API_BASE}/deploy/api/backends/${b.id}/cover` : null,
           });
         }
       }
