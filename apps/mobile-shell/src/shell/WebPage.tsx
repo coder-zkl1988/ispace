@@ -214,6 +214,60 @@ export function WebPage({
                   var after = el.getBoundingClientRect();
                   if (after.bottom > barBottom) barBottom = after.bottom;
                 }
+                /*
+                  上面那段只处理贴顶的 fixed/sticky 元素——很多页面根本没有这种
+                  吸顶栏，内容就是从文档流最上面开始画的。那种页面完全没被上面
+                  的循环碰到，barBottom 停在 0，于是内容照样从状态栏后面画起，
+                  该露出来的标题、按钮被系统的时间和信号图标压在下面。
+
+                  ⚠️ 这种情况**暂不处理**，维持原样（内容可能贴状态栏）。曾经
+                  试过在这里改内容的盒模型（先是给 body 加 padding，后来改成
+                  沿祖先链缩高度、缩完再补一块遮挡色）——两次都对付不了 Stirling
+                  PDF 这类外壳钉死在 window.innerHeight 上、且 overflow:hidden
+                  的复杂三方应用：缩高度会把贴着容器底边、靠正常文档流撑起来的
+                  内容（不是它自己 fixed/absolute 定位）直接裁没，缩完再补的遮挡
+                  层则会正好盖住"其实还在原地、只是没挪走"的那部分内容——两版
+                  都是让原本至少还看得见的东西彻底消失，比什么都不做更糟。
+                  在想出一个不靠"改任意页面内部结构"的稳妥办法之前，宁可留着
+                  这个已知的贴边小问题，也不再对不了解结构的页面动手。
+                */
+
+                /*
+                  底部安全区（手势条/Home 指示条）。跟顶部同一个结论：贴底的
+                  fixed/sticky 元素往上让位；找不到就**暂不处理**，理由同上——
+                  见顶部那段兜底为什么撤掉的完整说明。
+                */
+                var B = ${Math.round(insets.bottom)};
+                if (B > 0) {
+                  if (!document.getElementById('ispace-safe-bottom')) {
+                    var sb = document.createElement('style');
+                    sb.id = 'ispace-safe-bottom';
+                    sb.textContent = '.ispace-safe-bottom{padding-bottom:' + B + 'px !important;box-sizing:content-box}';
+                    document.head.appendChild(sb);
+                  }
+                  var barTop = window.innerHeight;
+                  for (var k = 0; k < all.length; k++) {
+                    var bel = all[k];
+                    var bcs = getComputedStyle(bel);
+                    if (bcs.position !== 'fixed' && bcs.position !== 'sticky') continue;
+                    var br = bel.getBoundingClientRect();
+                    // 只管真正贴底的那些；顶部栏、侧边浮标不动
+                    if (br.bottom < window.innerHeight - 2 || br.height > window.innerHeight * 0.5) continue;
+                    bel.classList.add('ispace-safe-bottom');
+                    // 同上：补偿以 bottom 定位的绝对定位子元素，理由与顶部那段一致
+                    var bsubs = bel.children;
+                    for (var m = 0; m < bsubs.length; m++) {
+                      var bsub = bsubs[m];
+                      var bscs = getComputedStyle(bsub);
+                      if (bscs.position === 'absolute' && bscs.bottom !== 'auto') {
+                        bsub.style.marginBottom = (-B) + 'px';
+                      }
+                    }
+                    var bafter = bel.getBoundingClientRect();
+                    if (bafter.top < barTop) barTop = bafter.top;
+                  }
+                }
+
                 var pick = function (el) {
                   var c = el ? getComputedStyle(el).backgroundColor : '';
                   if (!c || c === 'transparent' || c.indexOf(', 0)') >= 0) return null;
