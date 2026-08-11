@@ -33,7 +33,7 @@ export function registerMarketplaceRoutes(
     const rows = await sql`
       SELECT m.id, m.app_id, m.published_at, m.install_count, a.category,
              a.slug, a.name, a.description, a.icon_letter, a.cover_path, a.type, a.status,
-             a.source_prompt,
+             a.source_prompt, a.visit_count,
              u.username AS owner_username, u.display_name AS owner_name,
              EXISTS (
                SELECT 1 FROM ispace.app_installs i
@@ -209,7 +209,7 @@ export function registerMarketplaceRoutes(
     const me = await requireAuth(req);
     const rows = await sql`
       SELECT m.id, m.backend_id, m.published_at, m.install_count,
-             b.category, b.name, b.status, (b.cover IS NOT NULL) AS has_cover,
+             b.category, b.name, b.status, b.visit_count, (b.cover IS NOT NULL) AS has_cover,
              u.username AS owner_username, u.display_name AS owner_name,
              EXISTS (
                SELECT 1 FROM ispace.backend_installs i

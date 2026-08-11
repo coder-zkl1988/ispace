@@ -83,7 +83,7 @@ export function registerSvcProxy(
   });
 
   async function handler(req: FastifyRequest, reply: FastifyReply) {
-    const { user, name } = req.params as { user: string; name: string; '*'?: string };
+    const { user, name, '*': subpath } = req.params as { user: string; name: string; '*'?: string };
 
     const [row] = await sql<BackendRow[]>`
       SELECT b.id, b.owner_id, b.exposed, b.visibility, b.status, b.container_name, b.port
@@ -109,6 +109,19 @@ export function registerSvcProxy(
     }
     if (allowed === 'deny') {
       return reply.status(403).send({ code: 'FORBIDDEN', message: '你没有访问这个服务的权限。' });
+    }
+
+    /*
+      访问量计数：只算落在根路径的 GET。
+      /svc/{user}/{name}/... 是整个后端的原样代理，一次页面打开背后可能
+      跟着几十个子路径请求（接口、静态资源）——按每个请求计数，数字会与
+      静态页那边（shell.js 每次加载打一下，语义是"一次页面打开"）完全不
+      是一个量级，两种卡片摆在同一个市场网格里却没法比。根路径的一次 GET
+      是"打开这个服务"最接近的近似。fire-and-forget，慢不得代理本身。
+    */
+    if (req.method === 'GET' && !subpath) {
+      void sql`UPDATE ispace.backends SET visit_count = visit_count + 1 WHERE id = ${row.id}`
+        .catch(() => undefined);
     }
 
     // ── 代理 ────────────────────────────────────────────────────────

@@ -1351,6 +1351,7 @@ function Market({ isAdmin }: { isAdmin: boolean }) {
                 }}>{item.name}</a>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {item.owner_name} · <span className="num">{item.install_count}</span> 人在用
+                  {' · '}<span className="num">{item.visit_count}</span> 次访问
                   {item.kind === 'backend' && ' · 后端'}
                 </div>
               </div>

@@ -66,6 +66,7 @@ import { registerOverviewRoutes } from './routes/overview.js';
 import { registerAuthzRoutes } from './routes/authz.js';
 import { registerSvcProxy } from './routes/svc-proxy.js';
 import { registerConnectorRoutes } from './routes/connectors.js';
+import { registerVisitRoutes } from './routes/visits.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -926,6 +927,9 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
 
   // ── 创意市场 ────────────────────────────────────────────────────
   registerMarketplaceRoutes(app, { sql, requireAuth });
+
+  // ── 访问量：shell.js 每次静态页加载时打一下（后端服务的计数在 svc-proxy 里）
+  registerVisitRoutes(app, { sql });
 
   // ── 语音转写 ────────────────────────────────────────────────────
   registerVoiceRoutes(app, { requireAuth });

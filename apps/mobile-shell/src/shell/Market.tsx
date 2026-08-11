@@ -26,12 +26,14 @@ export interface AppListing {
   owner_username: string; owner_name: string;
   install_count: number; installed: boolean; mine: boolean;
   source_prompt: string | null;
+  visit_count: number;
 }
 
 export interface BackendListing {
   id: string; backend_id: string; name: string; status: string;
   owner_username: string; owner_name: string;
   install_count: number; installed: boolean; mine: boolean;
+  visit_count: number;
 }
 
 type MarketItem = ({ kind: 'app' } & AppListing) | ({ kind: 'backend' } & BackendListing);
@@ -120,7 +122,7 @@ export function Market({ token, onChanged }: {
               <View style={{ flex: 1 }}>
                 <Text style={s.name} numberOfLines={1}>{item.name}</Text>
                 <Text style={s.meta} numberOfLines={1}>
-                  {item.owner_name} · {item.install_count} 人在用
+                  {item.owner_name} · {item.install_count} 人在用 · {item.visit_count} 次访问
                   {item.kind === 'backend' ? ' · 后端' : ''}
                   {item.mine ? ' · 我做的' : ''}
                 </Text>

@@ -97,6 +97,8 @@ export interface Listing {
   owner_username: string; owner_name: string;
   installed: boolean; mine: boolean;
   category: string | null;
+  /** 页面被打开过多少次（shell.js 每次加载打一下，不去重）。 */
+  visit_count: number;
   /**
    * 做出这个页面的那段提示词（apps.source_prompt）。
    *
@@ -127,6 +129,8 @@ export interface BackendListing {
   category: string | null; name: string; status: string; has_cover: boolean;
   owner_username: string; owner_name: string;
   installed: boolean; mine: boolean;
+  /** 根路径被 GET 过多少次（svc-proxy 每次代理成功打一下，不去重）。 */
+  visit_count: number;
 }
 
 export interface InstalledBackend {

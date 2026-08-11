@@ -101,6 +101,18 @@ const STYLES = `
   if (seg.length < 2) return;
   const [owner, app] = seg as [string, string];
 
+  /*
+    访问量：一次页面加载打一下，不分是不是在原生壳的 WebView 里——
+    手机上打开也是一次真实的访问，不该只因为跳过了下面的 header 渲染就
+    漏计。fire-and-forget：这一下失败或变慢绝不能影响页面本身，
+    因此不 await、错误静默吞掉，也不重试。
+  */
+  void fetch('/deploy/api/visits/app', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ owner, slug: app }),
+  }).catch(() => { /* 掉一次不影响任何人，不重试 */ });
+
   const host = document.createElement(TAG);
   const shadow = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
