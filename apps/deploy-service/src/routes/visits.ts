@@ -36,7 +36,7 @@ export function registerVisitRoutes(
     */
     await sql`
       UPDATE ispace.apps a
-         SET visit_count = visit_count + 1
+         SET visit_count = visit_count + 1, last_accessed_at = now()
         FROM ispace.users u
        WHERE a.owner_id = u.id AND u.username = ${owner} AND a.slug = ${slug}
          AND a.status <> 'stopped'
