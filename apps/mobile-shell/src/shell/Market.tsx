@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Pressable, RefreshControl, ScrollView,
+  ActivityIndicator, Image, Pressable, RefreshControl, ScrollView,
   Share, StyleSheet, Text, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MARKETPLACE_CATEGORIES } from '@ispace/contracts';
 import { API_BASE } from '../config';
 
 /**
@@ -27,6 +28,8 @@ export interface AppListing {
   install_count: number; installed: boolean; mine: boolean;
   source_prompt: string | null;
   visit_count: number;
+  category: string | null;
+  cover_path: string | null;
 }
 
 export interface BackendListing {
@@ -34,9 +37,23 @@ export interface BackendListing {
   owner_username: string; owner_name: string;
   install_count: number; installed: boolean; mine: boolean;
   visit_count: number;
+  category: string | null;
+  has_cover: boolean;
 }
 
 type MarketItem = ({ kind: 'app' } & AppListing) | ({ kind: 'backend' } & BackendListing);
+
+/**
+ * 页面封面存的是站内相对路径（如 /zongkelong/gugong-yiri/cover.png），
+ * 靠浏览器同源自动补全——手机端的 Image 组件没有这个概念，相对路径等于
+ * 加载不出来，得自己补上 API_BASE（与 App.tsx 的 loadWebApps 同一个问题、
+ * 同一个修法）。已经是完整 URL（页面自己声明了外部图床）的不重复加前缀。
+ */
+const absCover = (u: string | null): string | null =>
+  !u ? null : /^https?:\/\//.test(u) ? u : `${API_BASE}${u}`;
+
+/** 每条 listing 的分类，未分类归「其他」——与电脑端 catOf 同一条口径。 */
+const catOf = (item: MarketItem): string => item.category?.trim() || '其他';
 
 export function Market({ token, onChanged }: {
   token: string | null;
@@ -48,6 +65,8 @@ export function Market({ token, onChanged }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [openPrompt, setOpenPrompt] = useState<AppListing | null>(null);
+  /** 选中的分类，null=全部。数据量是一个公司的共享内容，客户端过滤足够。 */
+  const [cat, setCat] = useState<string | null>(null);
 
   const auth = token ? { authorization: `Bearer ${token}` } : undefined;
 
@@ -96,6 +115,20 @@ export function Market({ token, onChanged }: {
     } finally { setBusy(null); }
   };
 
+  // 分类计数与排序：建议清单里的按清单顺序在前，自造的按名称跟其后，
+  // 「其他」永远垫底——与电脑端侧边栏同一条口径，只是这里画成一行横向 chip。
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(catOf(item), (counts.get(catOf(item)) ?? 0) + 1);
+  const cats = [...counts.keys()].sort((a, b) => {
+    if (a === '其他') return 1; if (b === '其他') return -1;
+    const ia = (MARKETPLACE_CATEGORIES as readonly string[]).indexOf(a);
+    const ib = (MARKETPLACE_CATEGORIES as readonly string[]).indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1; if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  const visible = cat === null ? items : items.filter((item) => catOf(item) === cat);
+
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
       {/* 市场是底部栏里的一个 tab，回首页点「首页」就行，不必再画返回键 */}
@@ -105,20 +138,42 @@ export function Market({ token, onChanged }: {
 
       {err && <Text style={s.err}>{err}</Text>}
 
+      {items.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.chipRow}
+        >
+          <Chip label="全部" count={items.length} on={cat === null} onPress={() => setCat(null)} />
+          {cats.map((cName) => (
+            <Chip key={cName} label={cName} count={counts.get(cName) ?? 0}
+              on={cat === cName} onPress={() => setCat(cName)} />
+          ))}
+        </ScrollView>
+      )}
+
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12 }}
+        contentContainerStyle={{ padding: 16, paddingTop: items.length > 0 ? 4 : 16, paddingBottom: 24, gap: 12 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor="#fb923c" />}
       >
         {!loading && items.length === 0 && (
           <Text style={s.empty}>还没有人上架内容。第一个来的人会被所有人看到。</Text>
         )}
+        {!loading && items.length > 0 && visible.length === 0 && (
+          <Text style={s.empty}>这个分类下还没有内容</Text>
+        )}
 
-        {items.map((item) => {
+        {visible.map((item) => {
           const letter = item.kind === 'app' ? item.icon_letter : item.name.slice(0, 1);
+          const cover = item.kind === 'app' ? absCover(item.cover_path)
+            : (item.has_cover ? `${API_BASE}/deploy/api/backends/${item.backend_id}/cover` : null);
           return (
           <View key={item.id} style={s.card}>
+            {cover && (
+              <Image source={{ uri: cover }} style={s.cover} resizeMode="cover" />
+            )}
             <View style={s.cardHead}>
-              <View style={s.icon}><Text style={s.iconText}>{letter}</Text></View>
+              {!cover && <View style={s.icon}><Text style={s.iconText}>{letter}</Text></View>}
               <View style={{ flex: 1 }}>
                 <Text style={s.name} numberOfLines={1}>{item.name}</Text>
                 <Text style={s.meta} numberOfLines={1}>
@@ -161,6 +216,18 @@ export function Market({ token, onChanged }: {
         <PromptSheet listing={openPrompt} onClose={() => setOpenPrompt(null)} />
       )}
     </View>
+  );
+}
+
+/** 分类筛选的一枚 chip：名字 + 条数，选中态用实心底色。 */
+function Chip({ label, count, on, onPress }: {
+  label: string; count: number; on: boolean; onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[s.chip, on && s.chipOn]}>
+      <Text style={[s.chipText, on && s.chipTextOn]}>{label}</Text>
+      <Text style={[s.chipCount, on && s.chipCountOn]}>{count}</Text>
+    </Pressable>
   );
 }
 
@@ -218,11 +285,30 @@ const s = StyleSheet.create({
   },
   empty: { color: '#909599', fontSize: 13, textAlign: 'center', paddingVertical: 50, lineHeight: 21 },
 
-  card: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 14,
-    borderWidth: 1, borderColor: 'rgba(0,0,0,.06)', gap: 10,
+  // 分类：横向一行 chip，电脑端是竖排侧边栏——手机屏幕宽度装不下，
+  // 横向可滚动是移动端做筛选最省地方的常见做法。
+  chipRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    height: 30, paddingHorizontal: 12, borderRadius: 15,
+    backgroundColor: '#f4f5f6',
   },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  chipOn: { backgroundColor: '#001217' },
+  chipText: { fontSize: 12.5, fontWeight: '600', color: '#545659' },
+  chipTextOn: { color: '#fff' },
+  chipCount: { fontSize: 11, color: '#909599' },
+  chipCountOn: { color: 'rgba(255,255,255,.7)' },
+
+  card: {
+    backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(0,0,0,.06)',
+  },
+  // 封面横幅贴卡片顶部；没有封面时不占地方，退回图标+文字那一行
+  cover: { width: '100%', aspectRatio: 1.9, backgroundColor: '#f4f5f6' },
+  cardHead: {
+    flexDirection: 'row', alignItems: 'center', gap: 11,
+    padding: 14, paddingBottom: 0,
+  },
   icon: {
     width: 44, height: 44, borderRadius: 12, backgroundColor: '#fb923c',
     alignItems: 'center', justifyContent: 'center',
@@ -230,8 +316,11 @@ const s = StyleSheet.create({
   iconText: { color: '#fff', fontSize: 19, fontWeight: '700' },
   name: { fontSize: 15.5, fontWeight: '700', color: '#001217' },
   meta: { fontSize: 11.5, color: '#909599', marginTop: 2 },
-  desc: { fontSize: 13, color: '#545659', lineHeight: 20 },
-  actions: { flexDirection: 'row', gap: 8 },
+  desc: {
+    fontSize: 13, color: '#545659', lineHeight: 20,
+    paddingHorizontal: 14, paddingTop: 10,
+  },
+  actions: { flexDirection: 'row', gap: 8, padding: 14, paddingTop: 10 },
   btn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 9 },
   btnPrimary: { backgroundColor: '#001217' },
   btnGhost: { backgroundColor: '#f4f5f6' },
