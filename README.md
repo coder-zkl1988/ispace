@@ -359,7 +359,7 @@ HTTP 与 HTTPS 的差别不只是协议：明文 HTTP 会静默关掉一批浏�
 
 ## 接入方式
 
-**MCP**（21 个工具）——`/deploy/mcp`，复用调用者身份，只能操作本人空间，
+**MCP**（22 个工具）——`/deploy/mcp`，复用调用者身份，只能操作本人空间，
 每次调用进审计日志：
 
 | 类别 | 工具 |
@@ -367,7 +367,7 @@ HTTP 与 HTTPS 的差别不只是协议：明文 HTTP 会静默关掉一批浏�
 | 看现状 | `list-apps` `list-backends` `app-status` |
 | 前端 | `deploy` `rollback` `releases` `delete-app` |
 | 后端 | `create-backend` `redeploy-backend` `delete-backend` |
-| 数据 | `data-connection` `list-tables` |
+| 数据 | `data-connection` `list-tables` `apply-migration` |
 | 外部 API | `list-connectors` `create-connector` |
 | 分享 | `set-visibility` `share-with` |
 | 手机端 | `publish-app` `mobile-channel` `mobile-rollback` `set-rollout` |

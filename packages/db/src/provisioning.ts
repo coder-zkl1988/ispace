@@ -163,3 +163,133 @@ export async function countUserRows(sql: Sql, username: string): Promise<number>
   `;
   return Number(rows[0]?.total ?? 0);
 }
+
+const USER_MIGRATION_MAX_STATEMENTS = 24;
+
+/**
+ * 把字符串字面量遮掉，后续关键字检查就不会把说明文字里的 SELECT 等误判成 SQL。
+ * 有意不支持 dollar quote 与双引号标识符：这两种语法很容易成为绕过限定的入口，
+ * 而 AI 生成的普通业务表完全不需要它们。
+ */
+function maskSqlStrings(input: string): string {
+  let out = '';
+  let quoted = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const c = input[i];
+    if (quoted) {
+      if (c === "'" && input[i + 1] === "'") {
+        out += '  ';
+        i += 1;
+      } else if (c === "'") {
+        quoted = false;
+        out += ' ';
+      } else {
+        out += c === '\n' ? '\n' : ' ';
+      }
+    } else if (c === "'") {
+      quoted = true;
+      out += ' ';
+    } else {
+      out += c;
+    }
+  }
+  if (quoted) {
+    throw new IspaceError(ERROR_CODES.INVALID_INPUT, '迁移 SQL 中有未闭合的字符串');
+  }
+  return out;
+}
+
+/** 仅允许用户 schema 内建模所需的 DDL；拒绝查询、权限与服务器级能力。 */
+export function validateUserMigration(input: string): string[] {
+  const sqlText = input.trim();
+  if (!sqlText) throw new IspaceError(ERROR_CODES.INVALID_INPUT, '迁移 SQL 不能为空');
+  if (sqlText.includes('$')) {
+    throw new IspaceError(ERROR_CODES.INVALID_INPUT, '迁移 SQL 不支持 dollar quote 或参数占位符');
+  }
+  if (sqlText.includes('"')) {
+    throw new IspaceError(ERROR_CODES.INVALID_INPUT, '表名和字段名请使用小写 snake_case，不要使用双引号标识符');
+  }
+
+  const masked = maskSqlStrings(sqlText);
+  if (/--|\/\*|\*\//.test(masked)) {
+    throw new IspaceError(ERROR_CODES.INVALID_INPUT, '迁移 SQL 不支持注释，请把说明放在工具调用外');
+  }
+
+  const statements = sqlText.split(';').map((s) => s.trim()).filter(Boolean);
+  const maskedStatements = masked.split(';').map((s) => s.trim()).filter(Boolean);
+  if (statements.length !== maskedStatements.length) {
+    throw new IspaceError(ERROR_CODES.INVALID_INPUT, '字符串中不能包含分号');
+  }
+  if (statements.length > USER_MIGRATION_MAX_STATEMENTS) {
+    throw new IspaceError(
+      ERROR_CODES.INVALID_INPUT,
+      `一次最多应用 ${USER_MIGRATION_MAX_STATEMENTS} 条迁移语句`,
+    );
+  }
+
+  const allowed = [
+    /^CREATE\s+TABLE\b/i,
+    /^ALTER\s+TABLE\b/i,
+    /^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i,
+    /^CREATE\s+POLICY\b/i,
+    /^COMMENT\s+ON\s+(?:TABLE|COLUMN)\b/i,
+  ];
+  const forbidden = [
+    /\b(?:SELECT|COPY|CALL|DO|EXECUTE)\b/i,
+    /\b(?:CREATE|ALTER|DROP)\s+(?:SCHEMA|DATABASE|ROLE|USER|FUNCTION|PROCEDURE|TRIGGER|EXTENSION)\b/i,
+    /\b(?:GRANT|REVOKE|RESET|SECURITY\s+DEFINER|OWNER\s+TO)\b/i,
+    /\bSET\s+SCHEMA\b/i,
+    /\bDROP\b/i,
+    /\bDISABLE\s+ROW\s+LEVEL\s+SECURITY\b/i,
+    /\b(?:pg_catalog|information_schema|ispace|public|storage|realtime|vault|cron|net)\b/i,
+    /\bAS\s+SELECT\b/i,
+    /\b(?:pg_[a-z0-9_]*|lo_import|lo_export|dblink[a-z0-9_]*|set_config|current_setting|nextval|currval|setval|to_regclass|query_to_xml)\s*\(/i,
+    /::\s*(?:regclass|regproc|regprocedure|regnamespace|regrole)\b/i,
+  ];
+
+  for (const statement of maskedStatements) {
+    if (!allowed.some((rule) => rule.test(statement))) {
+      throw new IspaceError(
+        ERROR_CODES.INVALID_INPUT,
+        '只支持 CREATE TABLE、ALTER TABLE、CREATE INDEX、CREATE POLICY 与 COMMENT',
+      );
+    }
+    const denied = forbidden.find((rule) => rule.test(statement));
+    if (denied) {
+      throw new IspaceError(ERROR_CODES.INVALID_INPUT, `迁移 SQL 包含不允许的能力：${denied.source}`);
+    }
+
+    // 唯一允许的限定调用是 RLS 策略里常见的 auth.uid()；其他 a.b 都可能跨 schema。
+    const withoutAuthUid = statement.replace(/\bauth\s*\.\s*uid\s*\(\s*\)/gi, 'auth_uid()');
+    if (/\b[a-z_][a-z0-9_$]*\s*\./i.test(withoutAuthUid)) {
+      throw new IspaceError(
+        ERROR_CODES.INVALID_INPUT,
+        '表名不要带 schema 前缀；迁移只能操作当前用户的数据空间',
+      );
+    }
+  }
+
+  return statements;
+}
+
+/**
+ * 在当前用户 schema 中原子应用迁移，并刷新 PostgREST schema 缓存。
+ * 这里使用平台数据库连接执行 DDL，但 validateUserMigration 把能力收窄到建模所需范围。
+ */
+export async function applyUserMigration(
+  sql: Sql,
+  username: string,
+  input: string,
+): Promise<{ schema: string; statementCount: number }> {
+  const schema = schemaNameFor(username);
+  const statements = validateUserMigration(input);
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe(`SET LOCAL search_path TO ${schema}`);
+    await tx.unsafe("SET LOCAL statement_timeout TO '8s'");
+    for (const statement of statements) await tx.unsafe(statement);
+  });
+  await sql`NOTIFY pgrst, 'reload schema'`;
+
+  return { schema, statementCount: statements.length };
+}

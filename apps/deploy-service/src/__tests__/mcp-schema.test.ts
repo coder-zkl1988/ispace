@@ -80,6 +80,22 @@ describe('MCP 工具入参 schema', () => {
     expect(s).not.toHaveProperty('required');
   });
 
+  it('apply-migration：只要求 SQL 正文，并明确限定到当前用户 schema', () => {
+    expect(zodToJsonSchema('apply-migration')).toEqual({
+      type: 'object',
+      properties: {
+        sql: {
+          type: 'string',
+          description:
+            '要应用到当前用户数据 schema 的 SQL。支持 CREATE TABLE、ALTER TABLE、'
+            + 'CREATE INDEX、CREATE POLICY、COMMENT；可一次提交多条语句并在同一事务执行。'
+            + '表名不要带 schema 前缀，平台会强制限定到当前用户的 u_* schema。',
+        },
+      },
+      required: ['sql'],
+    });
+  });
+
   it('每个工具都能转换，且没有字段被误判成 string', () => {
     // 全 string 是 zod 内部结构变化后的典型症状：类型探测全部落到兜底分支。
     const allTypes = MCP_TOOL_NAMES.flatMap((name) => {

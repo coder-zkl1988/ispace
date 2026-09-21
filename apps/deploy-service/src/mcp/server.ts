@@ -22,6 +22,7 @@ import {
   listAppsByOwner,
   listReleases,
   provisionUserSchema,
+  applyUserMigration,
   refreshStorageUsage,
   writeAudit,
   type Sql,
@@ -431,7 +432,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
           `1. 用 @supabase/supabase-js，建客户端时**必须**带 { db: { schema: '${schema}' } }，`,
           '   漏了会去查 public，那里什么都没有',
           '2. 这个公钥本就设计为发到前端，可以写进代码；数据库密码平台不下发',
-          '3. 建表时给每张表开 RLS 并按登录用户加策略——同一张表里不同终端用户的',
+          '3. 用 apply-migration 建表；给每张表开 RLS 并按登录用户加策略——同一张表里不同终端用户的',
           '   数据不该互相看见',
           '4. 存数据**不需要**创建后端应用，这条路不占后端配额',
         ].join('\n');
@@ -446,10 +447,40 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
            WHERE n.nspname = ${schema} AND c.relkind = 'r'
            ORDER BY c.relname
         `;
-        if (!rows.length) return `${schema} 里还没有表。应用第一次写数据时建即可。`;
+        if (!rows.length) return `${schema} 里还没有表。先用 apply-migration 建表，再写入数据。`;
         return rows.map((r) =>
           `${r.name}  约 ${Number(r.rows).toLocaleString()} 行  行级隔离${r.rls ? '已开' : '**未开**'}`,
         ).join('\n') + '\n\n（行数是统计估算值，不是精确计数）';
+      }
+
+      case 'apply-migration': {
+        const { sql: migrationSql } = args as { sql: string };
+        const applied = await applyUserMigration(sql, user.username, migrationSql);
+        const tables = await sql<{ name: string; rls: boolean }[]>`
+          SELECT c.relname AS name, c.relrowsecurity AS rls
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = ${applied.schema} AND c.relkind = 'r'
+           ORDER BY c.relname
+        `;
+        await writeAudit(sql, {
+          actorId: user.id,
+          action: 'data.migration.apply',
+          targetType: 'data_schema',
+          targetId: user.id,
+          source: 'mcp',
+          result: 'success',
+          metadata: { schema: applied.schema, statementCount: applied.statementCount },
+          ip: clientIp,
+        });
+        const withoutRls = tables.filter((table) => !table.rls).map((table) => table.name);
+        return [
+          `已在 ${applied.schema} 原子应用 ${applied.statementCount} 条迁移语句。`,
+          `当前表：${tables.length ? tables.map((table) => table.name).join('、') : '（无）'}`,
+          withoutRls.length
+            ? `注意：这些表尚未开启 RLS：${withoutRls.join('、')}。请继续用 apply-migration 补上策略。`
+            : '所有表均已开启 RLS。',
+          'PostgREST schema 缓存已刷新，可以开始通过 data-connection 返回的 REST 地址读写。',
+        ].join('\n');
       }
 
       // ── 外部 API ──────────────────────────────────────────────────

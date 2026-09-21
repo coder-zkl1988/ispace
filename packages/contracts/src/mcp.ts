@@ -37,6 +37,7 @@ export const MCP_TOOL_NAMES = [
   // 只能让用户自己去控制台复制连接信息——那一步就把非技术用户挡住了。
   'data-connection',
   'list-tables',
+  'apply-migration',
 
   // ── 外部 API ──
   // 与 data-connection 是一对：那条给数据库，这条给外部 API。
@@ -134,6 +135,14 @@ export const mcpCreateBackendInput = z.object({
 });
 
 export const mcpQuotaInput = z.object({});
+
+export const mcpApplyMigrationInput = z.object({
+  sql: z.string().trim().min(1).max(32_000).describe(
+    '要应用到当前用户数据 schema 的 SQL。支持 CREATE TABLE、ALTER TABLE、'
+    + 'CREATE INDEX、CREATE POLICY、COMMENT；可一次提交多条语句并在同一事务执行。'
+    + '表名不要带 schema 前缀，平台会强制限定到当前用户的 u_* schema。',
+  ),
+});
 
 export const mcpPublishAppInput = z.object({
   /**
@@ -242,6 +251,7 @@ export const MCP_TOOL_INPUTS = {
 
   'data-connection': empty,
   'list-tables': empty,
+  'apply-migration': mcpApplyMigrationInput,
 
   'list-connectors': empty,
   'create-connector': mcpCreateConnectorInput,
@@ -303,6 +313,11 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   'list-tables':
     '列出当前用户数据空间里已有的表、行数与行级隔离是否开启。'
     + '建表前先看，避免重名；也用来回答"我的数据存了多少"。',
+  'apply-migration':
+    '在当前用户独立的数据 schema 中应用受限 SQL 迁移。'
+    + '用于创建或调整业务表、索引与 RLS 策略；执行前先调 list-tables。'
+    + 'SQL 不要写 schema 前缀，平台会锁定到当前用户的 u_* schema。'
+    + '不接受任意查询、跨 schema、角色权限、函数、扩展或数据库级操作。',
 
   'list-connectors':
     '列出当前用户能用的外部 API 连接器，以及平台内置的可选目录。'
