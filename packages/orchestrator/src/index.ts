@@ -286,17 +286,30 @@ export class DokployOrchestrator implements Orchestrator {
     // appName 是 Dokploy 内部的容器名前缀，必须全局唯一且只含安全字符
     const appName = `ispace-${spec.username}-${spec.name}`.replace(/[^a-z0-9-]/g, '-');
 
-    const r = await this.call<{ applicationId: string }>('application.create', {
+    const r = await this.call<{ applicationId: string; appName?: string }>('application.create', {
       name: `${spec.username}/${spec.name}`,
       appName,
       environmentId,
       ...(spec.sourceRepo ? { description: spec.sourceRepo } : {}),
     });
 
+    /*
+      Dokploy 会在传进去的 appName 后面追加随机后缀（ispace-u-app →
+      ispace-u-app-hwcnjx），swarm 服务名用的是追加后的那个。/svc 代理按
+      container_name 直连容器，存自己拼的名字就是 bad address → 502——
+      容器明明在跑、平台也显示运行中。所以以 Dokploy 返回的为准；
+      响应里没带就回查一次，都拿不到才退回自己拼的。
+    */
+    const actualName = r.appName
+      ?? (await this.get<{ appName?: string }>('application.one', { applicationId: r.applicationId })
+        .then((a) => a.appName)
+        .catch(() => undefined))
+      ?? appName;
+
     const ref: BackendAppRef = {
       id: r.applicationId,
       urlPath: backendUrlPath(spec.username, spec.name),
-      containerName: appName,
+      containerName: actualName,
     };
 
     // 建完立刻写限额。放在 createBackendApp 内部而非交给调用方——
