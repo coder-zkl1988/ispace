@@ -743,7 +743,7 @@ function Generating({
   onOpen: (id: string, opts?: { forkOf?: string }) => void;
 }) {
   const [dev, setDev] = useState<Device>('phone');
-  const [vis, setVis] = useState<'private' | 'shared' | 'public'>('private');
+  const [vis, setVis] = useState<'private' | 'shared' | 'public' | 'link'>('private');
   const [follow, setFollow] = useState('');
   const [followImgs, setFollowImgs] = useState<AgentImage[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -1127,13 +1127,18 @@ function Generating({
         可见范围是发布之后的一次独立改动：发布链路本身只管"把东西放上去"，
         谁能看是 apps.visibility 那一列的事（和控制台里改它走同一条接口）。
       */
-      if (vis !== 'private') await api.setVisibility(r.app.id, vis).catch(() => undefined);
-      if (vis === 'public') await api.publishToMarket(r.app.id).catch(() => undefined);
+      let sharingError: string | null = null;
+      try { await api.setVisibility(r.app.id, vis); }
+      catch (e) { sharingError = e instanceof Error ? e.message : '分享设置失败'; }
+      if (sharingError) {
+        setGen((g) => ({ ...g, says: [...g.says, { me: false,
+          text: `页面已发布，但分享设置未生效：${sharingError}。请在「我的页面」中重新设置分享。` }] }));
+      }
       setGen((g) => ({ ...g, publishedUrl: r.url, confirmToken: null, site: r.app.slug }));
       /* 右栏这就换成正式地址，工作区预览没人看了，收掉它 */
       preview.release();
       setPubOpen(false);
-      onToast(`已发布到 ${r.url}`);
+      onToast(sharingError ? `页面已发布，分享设置失败：${sharingError}` : `已发布到 ${r.url}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '发布失败';
       /* 地址上已经有自己另一个页面：问一句，确认了再覆盖（问在 finally 之后，按钮先恢复） */

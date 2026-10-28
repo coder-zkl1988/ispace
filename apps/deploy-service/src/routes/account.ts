@@ -1,3 +1,4 @@
+import { createAuthProvider } from '@ispace/auth';
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
@@ -751,6 +752,12 @@ export function registerAccountRoutes(
     return reply.type(row.mime).send(row.bytes);
   });
 
+  app.get(`${API_BASE}/auth/feishu-binding`, async (req) => {
+    const me = await requireAuth(req);
+    const [identity] = await sql`SELECT 1 FROM ispace.external_identities WHERE provider = 'feishu' AND user_id = ${me.id}`;
+    return { enabled: createAuthProvider()?.name === 'feishu', bound: Boolean(identity) };
+  });
+
   app.get(`${API_BASE}/auth/policy`, async () => {
     const p = await getPlatformPolicy(sql);
     return {
@@ -758,7 +765,8 @@ export function registerAccountRoutes(
       passwordMin: p.passwordMinLength,
       selfRegisterEnabled: p.selfRegisterEnabled,
       requireApproval: p.requireApproval,
-      ssoEnabled: Boolean(process.env.OIDC_ISSUER),
+      ssoEnabled: Boolean(createAuthProvider()),
+      ssoProvider: createAuthProvider()?.name ?? null,
     };
   });
 }

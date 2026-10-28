@@ -196,8 +196,8 @@ export const mcpDeleteBackendInput = z.object({
 
 export const mcpSetVisibilityInput = z.object({
   site: appSlugSchema.describe('应用路径'),
-  visibility: z.enum(['private', 'public', 'shared']).describe(
-    'private 仅自己 / public 全公司（会上架创意市场）/ shared 指定同事。'
+  visibility: z.enum(['private', 'public', 'shared', 'link']).describe(
+    'link 公司内网持链接免登录（不上架市场、收回同事分享）；private 仅自己 / public 全公司（会上架创意市场）/ shared 指定同事。'
     + '改成 private 会连带收回已有的分享',
   ),
   category: z.string().trim().min(1).max(24).optional().describe(

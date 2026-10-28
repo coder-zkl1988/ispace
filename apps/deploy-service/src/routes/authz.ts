@@ -1,3 +1,4 @@
+import { isIntranetRequest } from '../services/intranet.js';
 import type { FastifyInstance } from 'fastify';
 import { API_BASE } from '@ispace/contracts';
 import type { SessionClaims } from '@ispace/auth';
@@ -45,8 +46,9 @@ export function registerAuthzRoutes(
       Caddy 的 forward_auth 把原始请求信息放在 X-Forwarded-* 里，
       原始 URI 在 X-Forwarded-Uri。不能用 req.url——那是本端点自己的路径。
     */
+    reply.header('cache-control', 'no-store');
     const uri = (req.headers['x-forwarded-uri'] as string | undefined) ?? '';
-    const m = /^\/([a-z0-9][a-z0-9-]{0,30})\/([a-z0-9][a-z0-9-]{0,30})(?:\/|$)/.exec(uri);
+    const m = /^\/([a-z0-9][a-z0-9-]{0,30})\/([a-z0-9][a-z0-9-]{0,30})(?:\/|\?|$)/.exec(uri);
     if (!m) {
       /*
         ⚠️ 认不出路径必须**拒绝**，不能放行。
@@ -68,7 +70,7 @@ export function registerAuthzRoutes(
       不会报错，它只是多放进来一些人。
     */
     const claims = await readResourceSession(req, sql, verifySession);
-    const access = await resolveAppAccess(sql, owner, slug, claims);
+    const access = await resolveAppAccess(sql, owner, slug, claims, isIntranetRequest(req));
 
     if (access.kind === 'ok') return reply.status(200).send();
     if (access.kind === 'notfound') {
@@ -79,6 +81,10 @@ export function registerAuthzRoutes(
       // 分享链接时看到一片空白，不知道该干什么。
       const back = encodeURIComponent(uri || `/${owner}/${slug}/`);
       return reply.status(302).header('location', `${publicBase}/?redirect=${back}`).send();
+    }
+    if (access.reason === 'network') {
+      return reply.status(403).type('text/html; charset=utf-8').send(shell('仅限公司网络',
+        '<h1>请连接公司网络或 VPN</h1><p>这个链接仅允许从公司网络访问，无需登录。连接后刷新页面即可。</p>'));
     }
     return reply.status(403).type('text/html; charset=utf-8').send(page403(owner));
   });

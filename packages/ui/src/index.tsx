@@ -530,11 +530,12 @@ export function Input({ style, ...rest }: React.InputHTMLAttributes<HTMLInputEle
 
 // ── Tabs ──────────────────────────────────────────────────────────────
 export function Tabs<T extends string>({
-  items, value, onChange,
-}: { items: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+  items, value, onChange, wrap = false,
+}: { items: { value: T; label: string }[]; value: T; onChange: (v: T) => void; wrap?: boolean }) {
   return (
     <div style={{
       display: 'inline-flex', gap: 'var(--space-1)', padding: 'var(--space-1)',
+      flexWrap: wrap ? 'wrap' : undefined, maxWidth: wrap ? '100%' : undefined,
       background: 'var(--surface-2)', borderRadius: 'var(--radius-10)',
     }}>
       {items.map((it) => {

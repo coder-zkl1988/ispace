@@ -15,6 +15,10 @@ HOST="${TARGET_HOST:?需要设置 TARGET_HOST，形如 deploy@ispace.example.com
 FILE="${1:-$REPO_ROOT/infra/caddy/Caddyfile}"
 DEST="${2:-/etc/ispace/Caddyfile}"
 SVC="${3:-caddy}"
+if [[ ! "$SVC" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+  echo "服务名包含非法字符：$SVC" >&2
+  exit 1
+fi
 
 echo "== 1. 上传到临时位置 =="
 /usr/bin/scp -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -29,9 +33,15 @@ if ! grep -q "Valid configuration" <<<"$out"; then
 fi
 echo "   Valid configuration"
 
-echo "== 3. 落地并重启 =="
-"$SCRIPT_DIR/remote.sh" "echo '${REMOTE_SUDO_PW:?需要设置 REMOTE_SUDO_PW 环境变量}' | sudo -S -p '' cp /tmp/Caddyfile.staged '$DEST'
-cd ~/ispace-deploy && docker compose -f static-hosting.compose.yml -p ispace restart $SVC 2>&1 | tail -2"
+echo "== 3. 落地并重建 =="
+"$SCRIPT_DIR/remote.sh" "echo '${REMOTE_SUDO_PW:?需要设置 REMOTE_SUDO_PW 环境变量}' | sudo -S -p '' cp /tmp/Caddyfile.staged '$DEST'"
+"$SCRIPT_DIR/remote.sh" "cd ~/ispace-deploy && docker compose -f static-hosting.compose.yml -p ispace up -d --force-recreate '$SVC' 2>&1 | tail -4"
+trusted=$("$SCRIPT_DIR/remote.sh" "cd ~/ispace-deploy && docker compose -f static-hosting.compose.yml -p ispace exec -T '$SVC' printenv ISPACE_CADDY_TRUSTED_PROXIES")
+if [ -z "$trusted" ]; then
+  echo "容器内未读取到 ISPACE_CADDY_TRUSTED_PROXIES，部署中止。" >&2
+  exit 1
+fi
+printf '   ISPACE_CADDY_TRUSTED_PROXIES=%s\n' "$trusted"
 
 echo "== 4. 冒烟 =="
 sleep 4

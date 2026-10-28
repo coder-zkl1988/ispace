@@ -12,6 +12,8 @@ services:
   caddy:
     image: caddy:2-alpine
     container_name: ispace-caddy
+    environment:
+      ISPACE_CADDY_TRUSTED_PROXIES: ${ISPACE_CADDY_TRUSTED_PROXIES:-127.0.0.1/32}
     restart: unless-stopped
     volumes:
       - /etc/ispace/Caddyfile:/etc/caddy/Caddyfile:ro

@@ -539,6 +539,9 @@ describe.skipIf(!DSN)('赛事接口（真实 Postgres）', () => {
     await moveVoteWindow(-60, 120);
     const early = await send('POST', `/events/${SLUG}/votes/${idOf('01')}`, undefined, AS('lixiao'));
     expect(early.statusCode).toBe(403);
+    const notStarted = (await get(`/events/${SLUG}`)).json();
+    expect(notStarted.finalists.every((f: { votes: null }) => f.votes === null)).toBe(true);
+    expect(notStarted.stats.voteTotal).toBe(0);
 
     // 窗口整段在过去
     await moveVoteWindow(120, -60);
@@ -641,10 +644,22 @@ describe.skipIf(!DSN)('赛事接口（真实 Postgres）', () => {
     expect(score.statusCode, '打分该被锁住').toBe(403);
   });
 
-  it('投票期间不对外暴露票数', async () => {
-    const pub = (await get(`/events/${SLUG}`)).json();
-    expect(pub.finalists.every((f: { votes: null }) => f.votes === null)).toBe(true);
-    expect(pub.stats.voteTotal).toBe(0);
+  it('投票开放后公开真实票数，截止后仍保留显示', async () => {
+    // 2026-10-22 决策（e196c0bf）已改为开始后显示。旧断言仍要求隐藏，
+    // 与 voteStarted 及 event-phase.test.ts 的规则冲突；这里校验数据库实际值。
+    const votes = await sql<{ idea_id: string; votes: number }[]>`
+      SELECT v.idea_id, count(*)::int AS votes FROM ispace.event_votes v
+      JOIN ispace.events e ON e.id = v.event_id WHERE e.slug = ${SLUG} GROUP BY v.idea_id`;
+    const expected = new Map(votes.map(v => [v.idea_id, v.votes]));
+    const check = async () => {
+      const pub = (await get(`/events/${SLUG}`)).json();
+      for (const f of pub.finalists) expect(f.votes).toBe(expected.get(f.ideaId) ?? 0);
+      expect(pub.stats.voteTotal).toBe(votes.reduce((sum, v) => sum + v.votes, 0));
+    };
+    await check();
+    const config = (await get(`/events/${SLUG}`)).json().event.config;
+    try { await moveVoteWindow(120, -60); await check(); }
+    finally { await send('PATCH', `/events/${SLUG}`, { config }, AS('admin')); }
   });
 
   // ── 汇总排名与获奖名单 ──────────────────────────────────────────

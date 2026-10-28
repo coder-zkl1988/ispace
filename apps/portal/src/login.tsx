@@ -116,7 +116,7 @@ function LoginForm({ policy, onRegister }: { policy: AuthPolicy | null; onRegist
       {policy?.ssoEnabled && (
         <>
           <a
-            href={api.loginUrl(location.pathname)}
+            href={api.loginUrl(new URLSearchParams(location.search).get('redirect') ?? location.pathname)}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, height: 50,
               border: '1px solid var(--border-hover)', borderRadius: 14, background: 'var(--surface-1)',
@@ -124,7 +124,7 @@ function LoginForm({ policy, onRegister }: { policy: AuthPolicy | null; onRegist
               cursor: 'pointer', textDecoration: 'none',
             }}
           >
-            <Icon name="building" size={18} />用公司账号登录（SSO）
+            <Icon name="building" size={18} />{policy.ssoProvider === 'feishu' ? '使用公司飞书登录' : '用公司账号登录（SSO）'}
           </a>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
             <span style={{ flex: 1, height: 1, background: 'var(--border-tabby)' }} />或

@@ -1,3 +1,4 @@
+import { isIntranetRequest } from '../services/intranet.js';
 import { request as httpRequest } from 'node:http';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Sql } from '@ispace/db';
@@ -78,7 +79,7 @@ export function registerSvcProxy(
       SELECT b.id, b.owner_id, b.exposed, b.visibility, b.status, b.container_name, b.port
         FROM ispace.backends b
         JOIN ispace.users u ON u.id = b.owner_id
-       WHERE u.username = ${user} AND b.name = ${name} AND u.status <> 'archived'
+       WHERE u.username = ${user} AND b.name = ${name} AND u.status = 'active'
     `;
 
     // 不存在 / 已停：一律 404，不区分——区分了就等于告诉对方这个路径是真的。
@@ -91,13 +92,13 @@ export function registerSvcProxy(
 
     // ── 鉴权 ────────────────────────────────────────────────────────
     const claims = await readResourceSession(req, sql, verifySession);
-    const allowed = await isAllowed(row, claims);
+    const allowed = await isAllowed(row, claims, isIntranetRequest(req));
     if (allowed === 'login') {
       // 页面调 /svc 是 fetch，302 没意义；这里直接 401，让页面自己处理
       return reply.status(401).send({ code: 'UNAUTHENTICATED', message: '请先登录。' });
     }
     if (allowed === 'deny') {
-      return reply.status(403).send({ code: 'FORBIDDEN', message: '你没有访问这个服务的权限。' });
+      return reply.status(403).send({ code: 'FORBIDDEN', message: row.visibility === 'link' ? '请连接公司网络或 VPN 后访问此链接。' : '你没有访问这个服务的权限。' });
     }
 
     /*
@@ -181,6 +182,7 @@ export function registerSvcProxy(
     for (const [k, v] of Object.entries(result.headers)) {
       if (v !== undefined && !DROP_HEADERS.has(k.toLowerCase())) reply.header(k, v);
     }
+    if (row.visibility === 'link') reply.header('cache-control', 'no-store');
     return reply.status(result.status).send(result.body);
   }
 
@@ -188,8 +190,9 @@ export function registerSvcProxy(
    * 能不能访问。返回 'ok' | 'login'（未登录）| 'deny'（登录了但无权）。
    */
   async function isAllowed(
-    row: BackendRow, claims: SessionClaims | null,
+    row: BackendRow, claims: SessionClaims | null, intranet: boolean,
   ): Promise<'ok' | 'login' | 'deny'> {
+    if (row.visibility === 'link') return intranet ? 'ok' : 'deny';
     if (!claims) return 'login';
     // 本人 / 管理员：直接放行
     if (claims.uid === row.owner_id || claims.role === 'admin') return 'ok';

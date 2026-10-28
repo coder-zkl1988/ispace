@@ -209,7 +209,7 @@ export const createBackendRequestSchema = z.object({
 /** 改后端的露出/可见性。只这两项可改，别的（源、端口）走重建。 */
 export const updateBackendSchema = z.object({
   exposed: z.boolean().optional(),
-  visibility: z.enum(['private', 'shared', 'public']).optional(),
+  visibility: z.enum(['private', 'shared', 'public', 'link']).optional(),
 });
 
 export const backendListResponseSchema = z.object({

@@ -20,6 +20,8 @@ export function ProfileDialog({ user, onUser, onClose }: {
   onUser: (u: User) => void;
   onClose: () => void;
 }) {
+  const [feishu, setFeishu] = useState<{ enabled: boolean; bound: boolean } | null>(null);
+  useEffect(() => { void api.feishuBinding().then(setFeishu).catch(() => setFeishu(null)); }, []);
   const [name, setName] = useState(user.displayName);
   /** 本地预览。选了图还没保存时顶掉服务端那张。 */
   const [preview, setPreview] = useState<string | null>(null);
@@ -140,6 +142,16 @@ export function ProfileDialog({ user, onUser, onClose }: {
             登录和找回密码认这个地址。要改找管理员，在控制台「员工与开通」里点你那行的「编辑」。
           </p>
         </Row>
+
+        {feishu?.enabled && (
+          <Row label="飞书登录">
+            {feishu.bound ? <span>已绑定公司飞书</span> : (
+              <a href={`/deploy/api/auth/login?bind=1&redirect=${encodeURIComponent(location.pathname)}`}>
+                绑定公司飞书，保留当前空间和项目
+              </a>
+            )}
+          </Row>
+        )}
 
         {err && (
           <p style={{ margin: 0, color: 'var(--danger)', fontSize: 'var(--text-sm)' }}>{err}</p>

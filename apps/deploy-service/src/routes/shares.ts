@@ -1,3 +1,4 @@
+import { setAppVisibility, shareAppWith } from '../services/visibility.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   API_BASE,
@@ -8,7 +9,7 @@ import {
   respondShareRequestSchema,
   type User,
 } from '@ispace/contracts';
-import { findUserByUsername, getPlatformPolicy, writeAudit, type Sql } from '@ispace/db';
+import { writeAudit, type Sql } from '@ispace/db';
 
 /**
  * 分享给个人（规格 D10，一期实现）。
@@ -116,60 +117,11 @@ export function registerShareRoutes(
     const { appId } = req.params as { appId: string };
     const body = (req.body ?? {}) as { visibility?: string };
     const vis = body.visibility;
-    if (vis !== 'private' && vis !== 'public' && vis !== 'shared') {
-      throw new IspaceError(ERROR_CODES.INVALID_INPUT, 'visibility 只能是 private / public / shared');
+    if (vis !== 'private' && vis !== 'public' && vis !== 'shared' && vis !== 'link') {
+      throw new IspaceError(ERROR_CODES.INVALID_INPUT, 'visibility 只能是 private / public / shared / link');
     }
 
-    const [owned] = await sql<{ name: string }[]>`
-      SELECT name FROM ispace.apps WHERE id = ${appId} AND owner_id = ${me.id}
-    `;
-    if (!owned) throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能改自己页面的可见范围');
-
-    /*
-      平台可以关掉某一档共享。挡在服务端而不是只在界面上隐藏——
-      隐藏只挡住了点按钮的人，直接调接口的照样能设。
-      「仅自己」永远允许：那是收紧，任何策略下都不该被拦住。
-    */
-    const policy = await getPlatformPolicy(sql);
-    if (vis === 'public' && !policy.allowPublicShare) {
-      throw new IspaceError(ERROR_CODES.FORBIDDEN, '平台已关闭「全公司」共享，请改用「指定同事」。');
-    }
-    if (vis === 'shared' && !policy.allowPeerShare) {
-      throw new IspaceError(ERROR_CODES.FORBIDDEN, '平台已关闭点对点分享。');
-    }
-
-    let revoked = 0;
-    if (vis === 'private') {
-      await sql`DELETE FROM ispace.marketplace_listings WHERE app_id = ${appId}`;
-      await sql`DELETE FROM ispace.app_installs WHERE app_id = ${appId}`;
-      const rows = await sql<{ id: string }[]>`
-        UPDATE ispace.shares SET status = 'revoked', responded_at = now()
-         WHERE app_id = ${appId} AND status IN ('pending','accepted')
-        RETURNING id
-      `;
-      revoked = rows.length;
-    } else if (vis === 'public') {
-      await sql`
-        INSERT INTO ispace.marketplace_listings (app_id, published_by)
-        VALUES (${appId}, ${me.id})
-        ON CONFLICT (app_id) DO UPDATE SET published_at = now()
-      `;
-    } else {
-      // 指定同事：从市场撤下，但保留已有的点对点分享
-      await sql`DELETE FROM ispace.marketplace_listings WHERE app_id = ${appId}`;
-      await sql`
-        DELETE FROM ispace.app_installs WHERE app_id = ${appId} AND source = 'marketplace'
-      `;
-    }
-
-    await sql`UPDATE ispace.apps SET visibility = ${vis}, updated_at = now() WHERE id = ${appId}`;
-    await writeAudit(sql, {
-      actorId: me.id, action: 'app.share', targetType: 'app', targetId: appId,
-      source: 'console', result: 'success',
-      metadata: { visibility: vis, app: owned.name, revoked },
-      ip: req.ip,
-    });
-    return { visibility: vis, revoked };
+    return setAppVisibility(sql, { user: me, appId, visibility: vis, source: 'console', ip: req.ip });
   });
 
   /**
@@ -275,50 +227,9 @@ export function registerShareRoutes(
     const me = await requireAuth(req);
     const input = createShareRequestSchema.parse(req.body);
 
-    const { allowPeerShare } = await getPlatformPolicy(sql);
-    if (!allowPeerShare) {
-      throw new IspaceError(ERROR_CODES.FORBIDDEN, '平台已关闭点对点分享。');
-    }
-
-    // 只能分享自己的应用。不校验会让任何人把别人的应用推给第三方，
-    // 制造出"看起来是 A 分享的"的假象。
-    const owned = await sql<{ id: string; name: string }[]>`
-      SELECT id, name FROM ispace.apps WHERE id = ${input.appId} AND owner_id = ${me.id}
-    `;
-    const appRow = owned[0];
-    if (!appRow) {
-      throw new IspaceError(ERROR_CODES.NOT_OWNER, '只能分享自己空间下的页面');
-    }
-
-    const to = await findUserByUsername(sql, input.toUsername);
-    if (!to || to.status !== 'active') {
-      throw new IspaceError(ERROR_CODES.NOT_FOUND, `没有找到同事 ${input.toUsername}`);
-    }
-    if (to.id === me.id) {
-      throw new IspaceError(ERROR_CODES.INVALID_INPUT, '不用分享给自己');
-    }
-
-    // shares_one_pending 部分唯一索引保证同一应用对同一人只有一条待处理，
-    // 这里用 ON CONFLICT 把重复分享变成幂等而非报错——用户重复点「分享」
-    // 是常见操作，不该看到错误。
-    const rows = await sql`
-      INSERT INTO ispace.shares (app_id, from_user_id, to_user_id, status)
-      VALUES (${input.appId}, ${me.id}, ${to.id}, 'pending')
-      ON CONFLICT (app_id, to_user_id) WHERE status = 'pending'
-      DO UPDATE SET created_at = now()
-      RETURNING *
-    `;
-    await sql`
-      UPDATE ispace.apps SET visibility = 'shared'
-       WHERE id = ${input.appId} AND visibility = 'private'
-    `;
-    await writeAudit(sql, {
-      actorId: me.id, action: 'app.share', targetType: 'app', targetId: input.appId,
-      source: 'console', result: 'success',
-      metadata: { to: to.username, app: appRow.name },
-      ip: req.ip,
-    });
-    return { share: rows[0] };
+    const { share } = await shareAppWith(sql, { user: me, appId: input.appId,
+      toUsername: input.toUsername, source: 'console', ip: req.ip });
+    return { share };
   });
 
   // ── 接受 / 拒绝 ───────────────────────────────────────────────────
@@ -327,33 +238,43 @@ export function registerShareRoutes(
     const { id } = req.params as { id: string };
     const { accept } = respondShareRequestSchema.parse(req.body ?? {});
 
-    // 只有接收方能回应。用 to_user_id 约束而非仅按 id 查——否则知道 id
-    // 的人可以替别人接受。
-    const rows = await sql<{ app_id: string }[]>`
-      UPDATE ispace.shares
-         SET status = ${accept ? 'accepted' : 'rejected'}, responded_at = now()
-       WHERE id = ${id} AND to_user_id = ${me.id} AND status = 'pending'
-      RETURNING app_id
-    `;
-    const row = rows[0];
-    if (!row) {
-      throw new IspaceError(ERROR_CODES.NOT_FOUND, '这条分享不存在或已处理过');
-    }
-
-    if (accept) {
-      // 建立引用而非复制内容：对方访问的仍是原作者空间下的 URL，
-      // 原作者回滚或停用，接收方看到的也随之变化
-      await sql`
-        INSERT INTO ispace.app_installs (app_id, user_id, source)
-        VALUES (${row.app_id}, ${me.id}, 'share')
-        ON CONFLICT (app_id, user_id) DO NOTHING
+    await sql.begin(async transaction => {
+      const tx = transaction as unknown as Sql;
+      // Use the same app-first lock order as visibility changes. The grant, install
+      // reference and audit record must commit together, before a revoke can proceed.
+      const [visible] = await tx`
+        SELECT a.id FROM ispace.apps a JOIN ispace.shares s ON s.app_id = a.id
+        WHERE s.id = ${id} AND s.to_user_id = ${me.id} AND a.visibility IN ('shared', 'public')
+        FOR UPDATE OF a`;
+      if (!visible) throw new IspaceError(ERROR_CODES.NOT_FOUND, '这条分享不存在或已收回');
+      // 只有接收方能回应。用 to_user_id 约束而非仅按 id 查——否则知道 id
+      // 的人可以替别人接受。
+      const rows = await tx<{ app_id: string }[]>`
+        UPDATE ispace.shares
+           SET status = ${accept ? 'accepted' : 'rejected'}, responded_at = now()
+         WHERE id = ${id} AND to_user_id = ${me.id} AND status = 'pending'
+        RETURNING app_id
       `;
-    }
+      const row = rows[0];
+      if (!row) {
+        throw new IspaceError(ERROR_CODES.NOT_FOUND, '这条分享不存在或已处理过');
+      }
 
-    await writeAudit(sql, {
-      actorId: me.id, action: 'app.share_respond', targetType: 'share', targetId: id,
-      source: 'console', result: 'success', metadata: { accept },
-      ip: req.ip,
+      if (accept) {
+        // 建立引用而非复制内容：对方访问的仍是原作者空间下的 URL，
+        // 原作者回滚或停用，接收方看到的也随之变化
+        await tx`
+          INSERT INTO ispace.app_installs (app_id, user_id, source)
+          VALUES (${row.app_id}, ${me.id}, 'share')
+          ON CONFLICT (app_id, user_id) DO NOTHING
+        `;
+      }
+
+      await writeAudit(tx, {
+        actorId: me.id, action: 'app.share_respond', targetType: 'share', targetId: id,
+        source: 'console', result: 'success', metadata: { accept },
+        ip: req.ip,
+      });
     });
     return { ok: true, accepted: accept };
   });
