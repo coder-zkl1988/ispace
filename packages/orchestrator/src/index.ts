@@ -134,8 +134,11 @@ export async function verifySource(src: string, fetchImpl = fetch): Promise<Sour
 
   // ── 镜像：去 registry 求证 ────────────────────────────────────────
   const ref = t.replace(/^docker\.io\//, '');
-  const [nameWithHost] = ref.split(':');
-  const parts = (nameWithHost ?? '').split('/');
+  // 去掉 @digest 与 :tag。不能按 ':' 切——registry 主机的端口也是冒号
+  // （127.0.0.1:5000/x/y:tag），切完主机名只剩 127.0.0.1，下面的私有 registry
+  // 判断就落空了。tag 的冒号之后不会再有 '/'，按这一点只剥最后一段。
+  const nameWithHost = ref.replace(/@.*$/, '').replace(/:[^/:]*$/, '');
+  const parts = nameWithHost.split('/');
   // 带点或端口的首段是私有 registry 主机名，那超出「只支持公开镜像」的范围
   if (parts.length > 1 && /[.:]/.test(parts[0] ?? '')) return { ok: true };
 

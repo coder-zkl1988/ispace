@@ -51,6 +51,24 @@ describe('verifySource', () => {
     expect(called).toBe(false);
   });
 
+  it('registry 主机带端口（服务器本地仓库 127.0.0.1:5000）同样放行', async () => {
+    // 端口的冒号曾被当成 tag 分隔符切掉，主机名只剩 127.0.0.1，
+    // 于是拿 library/127.0.0.1 去问 Docker Hub，404 后把自建镜像拦下
+    for (const src of [
+      '127.0.0.1:5000/ispace/omni-tools:0.7.0-9244e02',
+      '127.0.0.1:5000/ispace/omni-tools',
+      'registry.example.com:8443/team/app@sha256:abc',
+    ]) {
+      let called = false;
+      const r = await verifySource(src, async () => {
+        called = true;
+        return { ok: false, status: 404 } as Response;
+      });
+      expect(r.ok, src).toBe(true);
+      expect(called, src).toBe(false);
+    }
+  });
+
   it('GitHub 网页地址（/tree/）拦下并给出可克隆地址', async () => {
     const r = await verifySource(
       'https://github.com/GodzillaHe/azusa/tree/codex/image-generator-byok/image-generator',
