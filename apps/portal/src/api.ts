@@ -152,7 +152,7 @@ export interface InstalledBackend {
 
 export interface ExposedBackend {
   id: string; name: string; urlPath: string; status: string;
-  visibility: 'private' | 'shared' | 'public'; exposed: boolean; hasCover: boolean;
+  visibility: 'private' | 'shared' | 'public' | 'link'; exposed: boolean; hasCover: boolean;
 }
 
 export interface AuthPolicy {
@@ -160,6 +160,7 @@ export interface AuthPolicy {
   passwordMin: number;
   /** 配了 OIDC_* 时为真，登录页会多给一个 SSO 入口。 */
   ssoEnabled: boolean;
+  ssoProvider?: string | null;
 }
 
 /**
@@ -200,6 +201,7 @@ async function apkRelease(): Promise<ApkRelease> {
 export const api = {
   apkRelease,
   authPolicy: () => get<AuthPolicy>('/auth/policy'),
+  feishuBinding: () => get<{ enabled: boolean; bound: boolean }>('/auth/feishu-binding'),
   /**
    * 忘记密码：本人发起一条申请，管理员在控制台放行。
    *
@@ -253,7 +255,7 @@ export const api = {
   revokeShareTo: (appId: string, username: string) =>
     del<{ ok: boolean }>(`/apps/${appId}/shares/${encodeURIComponent(username)}`),
   /** 切换可见范围。改成「仅自己」会连带收回分享，revoked 是收回条数。 */
-  setVisibility: (appId: string, visibility: 'private' | 'public' | 'shared') =>
+  setVisibility: (appId: string, visibility: 'private' | 'public' | 'shared' | 'link') =>
     patch<{ visibility: string; revoked: number }>(`/apps/${appId}/visibility`, { visibility }),
   logout: () => post<{ ok: boolean }>('/auth/logout'),
   /** 铸一个手机扫码登录的一次性码。60 秒过期，用一次即毁。 */
@@ -281,7 +283,7 @@ export const api = {
     get<{ shares: { username: string; displayName: string; avatarUrl: string | null }[] }>(
       `/backends/${id}/shares`,
     ),
-  setBackendVisibility: (id: string, visibility: 'private' | 'public' | 'shared') =>
+  setBackendVisibility: (id: string, visibility: 'private' | 'public' | 'shared' | 'link') =>
     patch<{ ok: boolean }>(`/backends/${id}`, { visibility }),
   shareBackend: (id: string, toUsername: string) =>
     post<{ ok: boolean }>(`/backends/${id}/shares`, { toUsername }),

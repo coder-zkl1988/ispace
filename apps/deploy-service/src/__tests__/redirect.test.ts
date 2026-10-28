@@ -92,3 +92,10 @@ describe('畸形输入', () => {
     }
   });
 });
+
+
+describe('浏览器 URL 归一化后的边界', () => {
+  it.each(['//ispace.invalid', '/\\ispace.invalid', '/\\evil.example', '/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '/\\\\evil.example'])('拒绝看起来以单斜杠开头的外站跳转 %j', bad => {
+    expect(decideRedirect(state(bad), FALLBACK)).toEqual({ kind: 'web', to: FALLBACK });
+  });
+});

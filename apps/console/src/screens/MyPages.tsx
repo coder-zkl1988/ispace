@@ -17,11 +17,12 @@ import { api, type AppRow, type Me, type SharePeerInfo } from '../api';
  * 表格里原有的筛选（状态/类型/搜索）没有照搬：一个人的页面是个位数，筛选
  * 是为几十行准备的。真多到找不着时，左边那列自己会滚。
  */
-type Vis = 'private' | 'shared' | 'public';
+type Vis = 'private' | 'shared' | 'public' | 'link';
 
 const VIS_NOTE: Record<Vis, string> = {
   public: '全公司可见，已上架到探索。别人点「做同款」能看到做它的那句话。',
   shared: '只有你分享给的同事能打开。',
+  link: '公司内网内获得链接即可访问，无需登录，不上架市场。',
   private: '只有你自己能打开。',
 };
 
@@ -114,7 +115,7 @@ export function MyPages({ me }: { me: Me }) {
               key={cur.id}
               app={cur}
               owner={me.user.username}
-              onShare={() => setSharing(cur)}
+              onShare={(visibility) => setSharing({ ...cur, visibility })}
               onMsg={setMsg}
               onChanged={load}
               ask={ask}
@@ -144,7 +145,7 @@ function PagePanel({
 }: {
   app: AppRow;
   owner: string;
-  onShare: () => void;
+  onShare: (visibility: Vis) => void;
   onMsg: (m: string) => void;
   onChanged: () => void;
   ask: (req: ConfirmRequest) => Promise<boolean>;
@@ -153,6 +154,7 @@ function PagePanel({
   const [releases, setReleases] = useState<Release[]>([]);
   const [busy, setBusy] = useState(false);
   const [vis, setVis] = useState<Vis>(app.visibility as Vis);
+  useEffect(() => { setVis(app.visibility as Vis); }, [app.visibility]);
   const [status, setStatus] = useState(app.status);
 
   const loadReleases = useCallback(() => {
@@ -170,8 +172,8 @@ function PagePanel({
         「指定同事」选完还要有人可指定，所以顺手把分享弹窗打开——否则这一下
         只是把可见范围改窄了，而用户想做的是「给某几个人看」。
       */
-      if (v === 'shared') onShare();
-      else onMsg(v === 'public' ? '已上架到探索，全公司可见' : '已改为仅自己可见');
+      if (v === 'shared') onShare(v);
+      else onMsg(v === 'public' ? '已上架到探索，全公司可见' : v === 'link' ? '已开启公司内网免登录链接访问' : '已改为仅自己可见');
     } catch (e) { onMsg((e as Error).message); } finally { setBusy(false); }
   };
 
@@ -250,7 +252,7 @@ function PagePanel({
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', paddingTop: 4 }}>
             <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>谁能看</span>
             <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 12, background: 'var(--seg-bg)' }}>
-              {([['private', '仅自己'], ['shared', '指定同事'], ['public', '全公司']] as const).map(([k, label]) => {
+              {([['private', '仅自己'], ['shared', '指定同事'], ['public', '全公司'], ['link', '链接访问']] as const).map(([k, label]) => {
                 const on = vis === k;
                 return (
                   <button

@@ -1,3 +1,4 @@
+import { FeishuAuthProvider } from './feishu.js';
 import { z } from 'zod';
 
 /**
@@ -174,6 +175,12 @@ export class OidcAuthProvider implements AuthProvider {
  * 邮箱密码那条路（routes/account.ts）不经过 AuthProvider。
  */
 export function createAuthProvider(env: NodeJS.ProcessEnv = process.env): AuthProvider | null {
+  const feishu = [env.FEISHU_APP_ID, env.FEISHU_APP_SECRET, env.FEISHU_TENANT_KEY];
+  if (feishu.some(Boolean)) {
+    if (!feishu.every(Boolean)) throw new Error('飞书登录需要同时配置 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_TENANT_KEY');
+    return new FeishuAuthProvider({ appId: env.FEISHU_APP_ID!, appSecret: env.FEISHU_APP_SECRET!, tenantKey: env.FEISHU_TENANT_KEY! });
+  }
+
   if (env.OIDC_ISSUER && env.OIDC_CLIENT_ID && env.OIDC_CLIENT_SECRET) {
     return new OidcAuthProvider({
       issuer: env.OIDC_ISSUER,

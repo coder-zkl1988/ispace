@@ -74,6 +74,16 @@ async function reloadPostgrest(sql: Sql): Promise<void> {
  * @returns 该用户的 schema 名
  */
 export async function provisionUserSchema(sql: Sql, username: string): Promise<string> {
+  if (typeof sql.begin === 'function') {
+    return sql.begin(tx => provisionUserSchemaLocked(tx as unknown as Sql, username));
+  }
+  return provisionUserSchemaLocked(sql, username);
+}
+
+async function provisionUserSchemaLocked(sql: Sql, username: string): Promise<string> {
+  // Shared with Feishu onboarding and deprovisioning: the PostgREST schema list
+  // is a single cluster-wide value, not one value per employee.
+  await sql`SELECT pg_advisory_xact_lock(724391036)`;
   const schema = schemaNameFor(username);
 
   // ── 1. 先建 schema 与授权 ────────────────────────────────────────
@@ -131,6 +141,15 @@ export async function deprovisionUserSchema(
   username: string,
   drop = false,
 ): Promise<void> {
+  if (typeof sql.begin === 'function') {
+    await sql.begin(tx => deprovisionUserSchemaLocked(tx as unknown as Sql, username, drop));
+    return;
+  }
+  await deprovisionUserSchemaLocked(sql, username, drop);
+}
+
+async function deprovisionUserSchemaLocked(sql: Sql, username: string, drop: boolean): Promise<void> {
+  await sql`SELECT pg_advisory_xact_lock(724391036)`;
   const schema = schemaNameFor(username);
 
   // ── 1. 先从暴露列表移除并重载配置 ────────────────────────────────

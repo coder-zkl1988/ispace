@@ -1,3 +1,6 @@
+import { createIntranetPolicy } from './services/intranet.js';
+import { startLogin, consumeLogin, OAUTH_COOKIE, OAUTH_PATH, OAUTH_TTL } from './services/oauth-state.js';
+import { resolveFeishuAccount } from './services/feishu-account.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { writeFile, mkdtemp, rm } from 'node:fs/promises';
@@ -189,7 +192,11 @@ export function decideRedirect(state: string | undefined, fallback: string): Red
     const r = parsed.redirect;
     if (typeof r !== 'string') return { kind: 'web', to: fallback };
     if (r === NATIVE_REDIRECT) return { kind: 'native' };
-    if (r.startsWith('/') && !r.startsWith('//')) return { kind: 'web', to: r };
+    if (r.startsWith('/') && !r.startsWith('//') && !r.includes('\\') && !/[\u0000-\u001f\u007f]/.test(r)) {
+      // Browsers normalize backslashes as slashes: /\\evil.example is an external URL.
+      const base = 'https://ispace.invalid';
+      if (new URL(r, base).origin === base) return { kind: 'web', to: r };
+    }
   } catch {
     // state 损坏（截断、被改过）就当没给
   }
@@ -257,6 +264,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   const storage = storageConfigFromEnv();
   const deployService = new DeployService(sql, storage, PUBLIC_BASE);
   const authProvider = createAuthProvider();
+  createIntranetPolicy(process.env.ISPACE_INTRANET_CIDRS ?? '', process.env.ISPACE_TRUSTED_PROXY_CIDRS ?? '');
   const orchestrator = createOrchestrator();
   const sessions = new SessionService(
     process.env.SESSION_SECRET ?? 'dev-only-secret-at-least-32-characters-long',
@@ -496,11 +504,20 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   app.get(`${API_BASE}/auth/login`, async (req, reply) => {
     const provider = requireProvider();
-    const q = req.query as { redirect?: string; pairing?: string };
-    // pairing 由手机端生成并带上，登录完成后令牌存到它名下供轮询取走
-    const state = Buffer.from(
-      JSON.stringify({ redirect: q.redirect ?? '/', pairing: q.pairing }),
-    ).toString('base64url');
+    const q = req.query as { redirect?: string; pairing?: string; bind?: string };
+    if (q.pairing) {
+      const pairing = pairings.get(q.pairing);
+      if (!pairing || pairing.token || pairing.expiresAt <= Date.now()) {
+        throw new IspaceError(ERROR_CODES.UNAUTHENTICATED, '手机登录请求无效或已过期，请从 App 重新发起');
+      }
+    }
+    const bindUserId = q.bind === '1' ? (await requireAuth(req)).id : undefined;
+    if (bindUserId && provider.name !== 'feishu') throw new IspaceError(ERROR_CODES.INVALID_INPUT, '未启用飞书绑定');
+    const { state, browser } = await startLogin(sql, provider.name, {
+      redirect: q.redirect ?? '/', pairing: q.pairing, bindUserId,
+    });
+    reply.setCookie(OAUTH_COOKIE, browser, { path: OAUTH_PATH, httpOnly: true,
+      sameSite: 'lax', secure: PUBLIC_BASE.startsWith('https:'), maxAge: OAUTH_TTL });
     const redirectUri = `${PUBLIC_BASE}${API_BASE}/auth/callback`;
     return reply.redirect(provider.authorizeUrl({ state, redirectUri }));
   });
@@ -544,7 +561,20 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
 
   app.get(`${API_BASE}/auth/callback`, async (req, reply) => {
     const provider = requireProvider();
-    const q = req.query as { code?: string; state?: string };
+    const q = req.query as { code?: string; state?: string; error?: string };
+    const context = await consumeLogin(sql, provider.name, q.state, req.cookies[OAUTH_COOKIE]);
+    reply.clearCookie(OAUTH_COOKIE, { path: OAUTH_PATH });
+    if (context.bindUserId && (await requireAuth(req)).id !== context.bindUserId) {
+      throw new IspaceError(ERROR_CODES.UNAUTHENTICATED, '绑定期间账号发生变化，请重新发起');
+    }
+    const returnState = Buffer.from(JSON.stringify(context)).toString('base64url');
+    if (context.pairing) {
+      const pairing = pairings.get(context.pairing);
+      if (!pairing || pairing.token || pairing.expiresAt <= Date.now()) {
+        throw new IspaceError(ERROR_CODES.UNAUTHENTICATED, '手机登录请求无效或已过期，请从 App 重新发起');
+      }
+    }
+    if (q.error) throw new IspaceError(ERROR_CODES.UNAUTHENTICATED, '授权未完成，请重新登录');
     if (!q.code) throw new IspaceError(ERROR_CODES.INVALID_INPUT, '缺少授权码');
 
     const claims = await provider.exchange({
@@ -552,28 +582,9 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
       redirectUri: `${PUBLIC_BASE}${API_BASE}/auth/callback`,
     });
 
-    let user = await findUserBySso(sql, claims.sub);
-
-    /**
-     * 预开通账号的首次登录绑定。
-     *
-     * 管理员经 /provision 开通的账号，其 sso_subject 是占位值 `manual|{username}`
-     * ——开通时并不知道该员工在 IdP 里的真实 sub。此人首次 SSO 登录时按用户名
-     * 匹配到该占位账号，把真实 sub 绑上去。
-     *
-     * 安全约束：只绑定 sso_subject 仍是 `manual|` 前缀（即从未登录过）的账号。
-     * 已绑定过的账号不会被再次改写，否则同名冲突会变成账号劫持。
-     */
-    if (!user && claims.preferredUsername) {
-      const byName = await findUserByUsername(sql, claims.preferredUsername);
-      if (byName?.ssoSubject.startsWith('manual|')) {
-        await sql`
-          UPDATE ispace.users SET sso_subject = ${claims.sub} WHERE id = ${byName.id}
-        `;
-        user = { ...byName, ssoSubject: claims.sub };
-        app.log.info(`预开通账号 ${byName.username} 已绑定 SSO subject`);
-      }
-    }
+    let user = provider.name === 'feishu'
+      ? await resolveFeishuAccount(sql, claims, context.bindUserId)
+      : await findUserBySso(sql, claims.sub);
 
     if (!user) {
       // 首次登录自动开通。用 preferredUsername 作为路径标识；冲突或非法则拒绝，
@@ -601,6 +612,7 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
       await provisionUserSchema(sql, user.username);
     }
 
+    if (user.status !== 'active') throw new IspaceError(ERROR_CODES.UNAUTHENTICATED, '账号不可用，请联系管理员');
     const ttl = await sessionTtl();
     const token = await sessions.issue({
       uid: user.id, username: user.username, role: user.role, identity: user.identity,
@@ -608,9 +620,9 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
     }, ttl);
     // cookie 的 Max-Age 必须与令牌的 exp 一致：cookie 先过期会让人莫名
     // 被登出，令牌先过期则会让人拿着一个已失效的 cookie 一路 401
-    reply.header('set-cookie', sessionCookie(token, ttl));
+    reply.header('set-cookie', sessionCookie(token, ttl, PUBLIC_BASE.startsWith('https://')));
 
-    const pairingId = readPairingId(q.state);
+    const pairingId = readPairingId(returnState);
     if (pairingId) {
       // 令牌存下等手机来取，然后**停在网页上**，不跳深链。
       //
@@ -622,7 +634,7 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
       return reply.type('text/html; charset=utf-8').send(nativeDonePage(user.displayName));
     }
 
-    const decision = decideRedirect(q.state, `/${user.username}/`);
+    const decision = decideRedirect(returnState, `/${user.username}/`);
 
     if (decision.kind === 'native') {
       /**
@@ -1128,7 +1140,7 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
     setSessionCookie: async (reply, token) => {
       // 调用方会 await——见 account.ts 里那段注释：不 await 的话
       // header 会设在处理器 return 之后，cookie 根本不下发
-      reply.header('set-cookie', sessionCookie(token, await sessionTtl()));
+      reply.header('set-cookie', sessionCookie(token, await sessionTtl(), PUBLIC_BASE.startsWith('https://')));
     },
     publicBase: PUBLIC_BASE,
   });

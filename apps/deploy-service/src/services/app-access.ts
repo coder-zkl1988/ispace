@@ -19,7 +19,7 @@ export type AppAccess =
   /** 没登录。页面那条路会跳登录页，换令牌那条路回 401。 */
   | { kind: 'login' }
   /** 登录了，但这个页面没共享给他。 */
-  | { kind: 'forbidden' }
+  | { kind: 'forbidden'; reason?: 'network' }
   /** 不存在、已停用、或者作者已归档。 */
   | { kind: 'notfound' };
 
@@ -35,13 +35,14 @@ export async function resolveAppAccess(
   owner: string,
   slug: string,
   claims: { uid: string; role: string } | null,
+  intranet = false,
 ): Promise<AppAccess> {
   const [row] = await sql<Row[]>`
     SELECT a.id AS app_id, a.owner_id, a.visibility, a.status
       FROM ispace.apps a
       JOIN ispace.users u ON u.id = a.owner_id
      WHERE u.username = ${owner} AND a.slug = ${slug}
-       AND u.status <> 'archived'
+       AND u.status = 'active'
   `;
 
   /*
@@ -49,6 +50,11 @@ export async function resolveAppAccess(
     一律 notfound，不区分——区分了就等于告诉对方"这个路径是存在的"。
   */
   if (!row || row.status === 'stopped') return { kind: 'notfound' };
+
+  // Link access is never a login bypass for private/shared/public resources.
+  if (row.visibility === 'link') return intranet
+    ? { kind: 'ok', appId: row.app_id, ownerId: row.owner_id }
+    : { kind: 'forbidden', reason: 'network' };
 
   if (!claims) return { kind: 'login' };
 

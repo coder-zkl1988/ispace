@@ -73,7 +73,7 @@ export const appStatusSchema = z.enum(['running', 'building', 'stopped']);
  * shared   已分享给特定同事（shares 表）
  * public   已上架创意市场（marketplace_listings 表）
  */
-export const appVisibilitySchema = z.enum(['private', 'shared', 'public']);
+export const appVisibilitySchema = z.enum(['private', 'shared', 'public', 'link']);
 
 /**
  * 创意市场分类的**建议清单**。

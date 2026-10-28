@@ -26,6 +26,15 @@ services:
       NODE_ENV: production
       PORT: "3100"
       LOG_LEVEL: info
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_TENANT_KEY: ${FEISHU_TENANT_KEY:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      ISPACE_INTRANET_CIDRS: ${ISPACE_INTRANET_CIDRS:-}
+      ISPACE_TRUSTED_PROXY_CIDRS: ${ISPACE_TRUSTED_PROXY_CIDRS:-}
       ISPACE_PUBLIC_BASE: ${ISPACE_PUBLIC_BASE:?平台对外根地址，如 https://ispace.example.com}
       # 平台元数据与用户 schema 都在 Supabase 的那套 Postgres 里
       PGHOST: supabase-db

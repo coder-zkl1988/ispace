@@ -36,6 +36,8 @@ export interface PlaySession {
   token: string;
   /** 换令牌的那个人。令牌只对他有效期内的那几分钟负责。 */
   viewerId: string;
+  /** Password/session revocation generation when the token was issued. */
+  epoch: number;
   owner: string;
   slug: string;
   createdAt: number;
@@ -55,12 +57,12 @@ export class PlaySessions {
    * 换一张令牌。调用方**必须先判完可见性**（services/app-access.ts）——
    * 这个类只管生命周期，不碰权限。
    */
-  open(viewerId: string, owner: string, slug: string): PlaySession {
+  open(viewerId: string, owner: string, slug: string, epoch = 0): PlaySession {
     this.prune();
 
     /* 同一个人、同一个作品已有一张就续用：翻回上一个作品不该再换钥匙 */
     for (const s of this.byToken.values()) {
-      if (s.viewerId === viewerId && s.owner === owner && s.slug === slug) {
+      if (s.viewerId === viewerId && s.owner === owner && s.slug === slug && s.epoch === epoch) {
         s.lastSeenAt = this.now();
         return s;
       }
@@ -78,6 +80,7 @@ export class PlaySessions {
       /* 24 字节 = 192 位熵。它就是凭据，要像会话令牌一样猜不出来。 */
       token: randomBytes(24).toString('base64url'),
       viewerId,
+      epoch,
       owner,
       slug,
       createdAt: this.now(),

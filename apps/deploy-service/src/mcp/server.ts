@@ -1,3 +1,4 @@
+import { setAppVisibility, shareAppWith } from '../services/visibility.js';
 import { writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -365,7 +366,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
            WHERE a.owner_id = ${user.id} AND r.id = a.current_release_id
         `;
         const vmap = new Map(cur.map((r) => [r.app_id, r.version]));
-        const vis = { private: '仅自己', public: '全公司', shared: '指定同事' } as const;
+        const vis = { private: '仅自己', public: '全公司', shared: '指定同事', link: '链接访问（内网免登录）' } as const;
         return apps.map((a) => [
           `/${a.slug}`,
           a.name,
@@ -414,7 +415,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
         `;
         const rs = await listReleases(sql, a.id);
         const cur = rs.find((r) => r.status === 'active');
-        const vis = { private: '仅自己', public: '全公司（已上架创意市场）', shared: '指定同事' } as const;
+        const vis = { private: '仅自己', public: '全公司（已上架创意市场）', shared: '指定同事', link: '链接访问（内网免登录）' } as const;
         return [
           `${a.name}  /${site}`,
           `地址    ${d.publicBase}/${user.username}/${site}/`,
@@ -644,35 +645,12 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
 
       // ── 分享 ──────────────────────────────────────────────────────
       case 'set-visibility': {
-        const { site, visibility, category } = args as { site: string; visibility: 'private' | 'public' | 'shared'; category?: string };
+        const { site, visibility, category } = args as { site: string; visibility: 'private' | 'public' | 'shared' | 'link'; category?: string };
         const a = await findApp(sql, user.id, site);
         if (!a) throw new IspaceError(ERROR_CODES.NOT_FOUND, `没有找到应用 /${site}`);
 
-        let revoked = 0;
-        if (visibility === 'private') {
-          await sql`DELETE FROM ispace.marketplace_listings WHERE app_id = ${a.id}`;
-          await sql`DELETE FROM ispace.app_installs WHERE app_id = ${a.id}`;
-          const r = await sql<{ id: string }[]>`
-            UPDATE ispace.shares SET status = 'revoked', responded_at = now()
-             WHERE app_id = ${a.id} AND status IN ('pending','accepted') RETURNING id
-          `;
-          revoked = r.length;
-        } else if (visibility === 'public') {
-          if (category) await sql`UPDATE ispace.apps SET category = ${category} WHERE id = ${a.id}`;
-          await sql`
-            INSERT INTO ispace.marketplace_listings (app_id, published_by)
-            VALUES (${a.id}, ${user.id})
-            ON CONFLICT (app_id) DO UPDATE SET published_at = now()
-          `;
-        } else {
-          await sql`DELETE FROM ispace.marketplace_listings WHERE app_id = ${a.id}`;
-        }
-        await sql`UPDATE ispace.apps SET visibility = ${visibility}, updated_at = now() WHERE id = ${a.id}`;
-        await writeAudit(sql, {
-          actorId: user.id, action: 'app.share', targetType: 'app', targetId: a.id,
-          source: 'mcp', result: 'success', metadata: { visibility, revoked }, ip: clientIp,
-        });
-        const label = { private: '仅自己', public: '全公司', shared: '指定同事' }[visibility];
+        const { revoked } = await setAppVisibility(sql, { user, appId: a.id, visibility, category, source: 'mcp', ip: clientIp });
+        const label = { private: '仅自己', public: '全公司', shared: '指定同事', link: '链接访问（内网免登录）' }[visibility];
         return `/${site} 的可见范围已设为「${label}」`
           + (revoked ? `，同时收回了 ${revoked} 个分享` : '')
           + (visibility === 'public' ? '，已上架创意市场' : '');
@@ -682,24 +660,8 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
         const { site, toUsername } = args as { site: string; toUsername: string };
         const a = await findApp(sql, user.id, site);
         if (!a) throw new IspaceError(ERROR_CODES.NOT_FOUND, `没有找到应用 /${site}`);
-        const to = await findUserByUsername(sql, toUsername);
-        if (!to) throw new IspaceError(ERROR_CODES.NOT_FOUND, `没有这位同事：${toUsername}`);
-        if (to.id === user.id) {
-          throw new IspaceError(ERROR_CODES.INVALID_INPUT, '不用分享给自己');
-        }
-        await sql`
-          INSERT INTO ispace.shares (app_id, from_user_id, to_user_id, status)
-          VALUES (${a.id}, ${user.id}, ${to.id}, 'pending')
-          ON CONFLICT (app_id, to_user_id) DO UPDATE SET status = 'pending', responded_at = NULL
-        `;
-        // 可见范围仍是"仅自己"的话，分享出去对方也打不开——顺手收紧到 shared
-        if (a.visibility === 'private') {
-          await sql`UPDATE ispace.apps SET visibility = 'shared' WHERE id = ${a.id}`;
-        }
-        await writeAudit(sql, {
-          actorId: user.id, action: 'app.share', targetType: 'app', targetId: a.id,
-          source: 'mcp', result: 'success', metadata: { to: toUsername }, ip: clientIp,
-        });
+        const { target: to } = await shareAppWith(sql, { user, appId: a.id,
+          toUsername, source: 'mcp', ip: clientIp });
         return `已分享 ${a.name} 给 ${to.displayName}（${toUsername}），`
           + '对方主页会出现待接受卡，接受后即可访问。';
       }

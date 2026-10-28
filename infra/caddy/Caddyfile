@@ -1,6 +1,11 @@
 {
 	auto_https off
 	admin off
+	servers {
+		# Space-separated proxy CIDRs. Only ingress proxies belong here, never all clients.
+		trusted_proxies static {$ISPACE_CADDY_TRUSTED_PROXIES:127.0.0.1/32}
+		trusted_proxies_strict
+	}
 }
 
 :8080 {
@@ -96,6 +101,7 @@
 		not path_regexp ^/(1024|app|console|create|deploy|dist|foryou|mine|updates|platform|supabase|svc|api|assets|static|admin|login|logout|health|reset|_)(/|$)
 	}
 	handle @userapp {
+		@userappRoot path_regexp ^/[^/]+/[^/]+$
 		# ⚠️ 必须用 route 而不是裸写指令。
 		#
 		# Caddyfile 里的指令是按**标准顺序**执行的，不是按写的顺序。
@@ -119,6 +125,10 @@
 				uri /deploy/api/authz/page
 			}
 
+			# Recheck permissions on every request, including after sharing is revoked.
+			header Cache-Control "no-store"
+			# Canonical directory URL keeps relative JS/CSS paths under this application.
+			redir @userappRoot {http.request.uri.path}/?{http.request.uri.query} 308
 			root * /srv/sites/{re.ua.1}/{re.ua.2}
 			uri path_regexp ^/[^/]+/[^/]+ ""
 			try_files {path} {path}/ /index.html

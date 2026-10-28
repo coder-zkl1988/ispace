@@ -64,7 +64,7 @@ export interface Backend {
   /** 是否在「我的空间」露出。false=纯 API 服务，只对控制台与 AI 可见。 */
   exposed: boolean;
   /** 露出后的访问范围，与页面同义。exposed=false 时无意义。 */
-  visibility: 'private' | 'shared' | 'public';
+  visibility: 'private' | 'shared' | 'public' | 'link';
   hasCover: boolean;
   containerName: string | null;
   orchestratorRef: string | null;
@@ -85,7 +85,7 @@ export function toBackend(r: Record<string, unknown>): Backend {
     urlPath: r.url_path as string,
     port: Number(r.port ?? 3000),
     exposed: Boolean(r.exposed),
-    visibility: (r.visibility as 'private' | 'shared' | 'public') ?? 'private',
+    visibility: (r.visibility as 'private' | 'shared' | 'public' | 'link') ?? 'private',
     hasCover: Boolean(r.has_cover ?? (r.cover != null)),
     containerName: (r.container_name as string | null) ?? null,
     orchestratorRef: r.orchestrator_ref as string | null,

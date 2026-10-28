@@ -179,13 +179,14 @@ export function Backends({ me }: { me: Me }) {
                           <Select
                             value={b.visibility}
                             onChange={(v) => void act(
-                              () => api.updateBackend(b.id, { visibility: v as 'private' | 'shared' | 'public' }),
+                              () => api.updateBackend(b.id, { visibility: v as 'private' | 'shared' | 'public' | 'link' }),
                               `已改「${b.name}」的可见范围`,
                             )}
                             items={[
                               { value: 'private', label: '仅自己' },
                               { value: 'shared', label: '指定同事' },
                               { value: 'public', label: '全公司' },
+                              { value: 'link', label: '链接访问（内网免登录）' },
                             ]}
                           />
                           {b.visibility === 'shared' && (
@@ -195,11 +196,16 @@ export function Backends({ me }: { me: Me }) {
                             onClick={() => void act(() => api.updateBackend(b.id, { exposed: false }), `已从空间收回「${b.name}」`)}>收回</Button>
                         </span>
                       ) : (
+                        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <Select value={b.visibility === 'link' ? 'link' : 'private'}
+                          onChange={(v) => void act(() => api.updateBackend(b.id, { visibility: v as 'private' | 'link' }), '已更新 API 访问方式')}
+                          items={[{ value: 'private', label: '需登录' }, { value: 'link', label: '内网免登录 API' }]} />
                         <Button size="sm" variant="ghost" disabled={busy}
                           onClick={() => void act(
                             () => api.updateBackend(b.id, { exposed: true, visibility: 'public' }),
                             `「${b.name}」已作为应用露出到「我的页面」，全公司可访问`,
                           )}>露出到空间</Button>
+                        </span>
                       )}
                     </td>
                     <td className="num" style={{ padding: 'var(--space-5) var(--space-8)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{fmtDate(b.createdAt)}</td>

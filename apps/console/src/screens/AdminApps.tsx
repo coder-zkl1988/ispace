@@ -276,8 +276,9 @@ export function AdminApps() {
   );
 }
 
-function VisibilityBadge({ v }: { v: 'private' | 'shared' | 'public' }) {
+function VisibilityBadge({ v }: { v: 'private' | 'shared' | 'public' | 'link' }) {
   if (v === 'public') return <Badge tone="success">全公司</Badge>;
+  if (v === 'link') return <Badge tone="neutral">链接访问</Badge>;
   if (v === 'shared') return <Badge tone="warning">指定同事</Badge>;
   return <Badge tone="neutral">仅自己</Badge>;
 }

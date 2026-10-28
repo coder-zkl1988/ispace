@@ -1263,8 +1263,8 @@ export function PublishMenu({
    */
   device: 'phone' | 'pc';
   onDevice: (d: 'phone' | 'pc') => void;
-  vis: 'private' | 'shared' | 'public';
-  setVis: (v: 'private' | 'shared' | 'public') => void;
+  vis: 'private' | 'shared' | 'public' | 'link';
+  setVis: (v: 'private' | 'shared' | 'public' | 'link') => void;
   canPublish: boolean;
   /** 现在还发不了的原因，写在按钮上。能发时为空。 */
   notReady: string | null;
@@ -1376,6 +1376,7 @@ export function PublishMenu({
                 { k: 'private', label: '仅自己' },
                 { k: 'shared', label: '指定同事' },
                 { k: 'public', label: '全公司' },
+                { k: 'link', label: '链接访问' },
               ]}
               value={vis}
               onPick={(k) => setVis(k as 'private')}

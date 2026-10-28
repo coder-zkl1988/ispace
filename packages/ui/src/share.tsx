@@ -13,12 +13,13 @@ import { copyText } from './clipboard.js';
  */
 
 /** 设计稿的三档可见范围，与 apps.visibility 一一对应。 */
-export type ShareVisibility = 'private' | 'public' | 'shared';
+export type ShareVisibility = 'private' | 'public' | 'shared' | 'link';
 
 const VIS_TABS: { value: ShareVisibility; label: string }[] = [
   { value: 'private', label: '仅自己' },
   { value: 'public', label: '全公司' },
   { value: 'shared', label: '指定同事' },
+  { value: 'link', label: '链接访问' },
 ];
 
 export interface SharePeer {
@@ -140,7 +141,7 @@ export function ShareDialog({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
         {/* ── 谁能打开 ─────────────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-6)' }}>
           <span style={{
             fontSize: 'var(--text-2xs)', fontWeight: 'var(--weight-semibold)',
             letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase',
@@ -148,12 +149,16 @@ export function ShareDialog({
           }}>
             谁能打开
           </span>
-          <Tabs items={VIS_TABS} value={vis} onChange={setVis} />
+          <Tabs items={VIS_TABS} value={vis} onChange={setVis} wrap />
         </div>
         <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: 1.6, marginTop: 'calc(var(--space-8) * -1)' }}>
           选「全公司」会同时上架到创意市场；选「指定同事」对方主页会收到接受 / 拒绝的入口卡。
-          两者都要点下面的「确认分享」才发生。
+          选「链接访问」只允许公司内网免登录访问，不上架市场，并收回已有的同事分享。保存后再复制链接。
         </span>
+
+        {vis === 'link' && <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+          页面依赖的后端服务需单独开启内网免登录；个人数据及连接器不会随页面自动开放。
+        </p>}
 
         {/* ── 指定同事 ─────────────────────────────────────────── */}
         {editingPeers && (
@@ -273,7 +278,7 @@ export function ShareDialog({
         )}
 
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
-          仅限公司网络 / VPN 内访问；分享与访问都会进审计日志，可随时改回「仅自己」。
+          链接访问仅限公司网络 / VPN。分享设置会记录操作日志；匿名访问不识别员工身份，可随时改回「仅自己」。
         </p>
       </div>
     </Dialog>

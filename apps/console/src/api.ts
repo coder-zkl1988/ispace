@@ -87,7 +87,7 @@ export interface Backend {
   sourceRepo: string | null; cpuLimit: number; memLimitMb: number;
   status: 'creating' | 'running' | 'stopped' | 'failed';
   urlPath: string; orchestratorRef: string | null; createdAt: string;
-  port: number; exposed: boolean; visibility: 'private' | 'shared' | 'public';
+  port: number; exposed: boolean; visibility: 'private' | 'shared' | 'public' | 'link';
   /** 服务于哪个页面。null = 没关联。 */
   appSlug?: string | null;
 }
@@ -135,7 +135,7 @@ export interface AuditEntry extends AuditLog { actorUsername: string }
 /** GET /admin/apps 的原始行，蛇形命名——跟 AdminToken 一样直接透传 SQL 行，没有服务端重塑。 */
 export interface AdminApp {
   id: string; slug: string; name: string; description: string | null;
-  category: string | null; visibility: 'private' | 'shared' | 'public';
+  category: string | null; visibility: 'private' | 'shared' | 'public' | 'link';
   status: 'running' | 'building' | 'stopped';
   cover_path: string | null; size_bytes: number; created_at: string; updated_at: string;
   owner_username: string; owner_name: string; listed: boolean;
@@ -144,7 +144,7 @@ export interface AdminApp {
 /** GET /admin/backends 的原始行，同上不重塑。 */
 export interface AdminBackend {
   id: string; name: string; url_path: string; category: string | null;
-  visibility: 'private' | 'shared' | 'public';
+  visibility: 'private' | 'shared' | 'public' | 'link';
   status: 'creating' | 'running' | 'stopped' | 'failed';
   created_at: string; owner_username: string; owner_name: string; listed: boolean;
 }
@@ -397,7 +397,7 @@ export const api = {
   appShares: (appId: string) => req<{ peers: SharePeerInfo[] }>(`/apps/${appId}/shares`),
   revokeShareTo: (appId: string, username: string) =>
     req<{ ok: boolean }>(`/apps/${appId}/shares/${encodeURIComponent(username)}`, { method: 'DELETE' }),
-  setVisibility: (appId: string, visibility: 'private' | 'public' | 'shared') =>
+  setVisibility: (appId: string, visibility: 'private' | 'public' | 'shared' | 'link') =>
     req<{ visibility: string; revoked: number }>(`/apps/${appId}/visibility`, {
       method: 'PATCH', body: JSON.stringify({ visibility }),
     }),
@@ -499,7 +499,7 @@ export const api = {
     limits: { cpu: number; memoryMb: number; count: number };
     orchestrator: string;
   }>('/backends'),
-  updateBackend: (id: string, body: { exposed?: boolean; visibility?: 'private' | 'shared' | 'public' }) =>
+  updateBackend: (id: string, body: { exposed?: boolean; visibility?: 'private' | 'shared' | 'public' | 'link' }) =>
     req<{ backend: Backend }>(`/backends/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   backendShares: (id: string) =>
     req<{ shares: { username: string; displayName: string }[] }>(`/backends/${id}/shares`),
