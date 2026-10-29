@@ -23,7 +23,13 @@ interface Me {
 
 const TAG = 'ispace-chrome';
 const HEIGHT = 44;
-const STORAGE_KEY = 'ispace.chrome.collapsed';
+/*
+ * 默认收起，只记「人主动展开过」。
+ *
+ * 旧键 ispace.chrome.collapsed 不能沿用：以前每次挂载都会把当前状态写回去，
+ * 几乎每个浏览器里都存着 '0'（展开），按它读就等于默认改不过来。
+ */
+const STORAGE_KEY = 'ispace.chrome.expanded';
 const API_ME = '/deploy/api/me';
 const LOGIN_URL = '/deploy/api/auth/login';
 const BRAND_MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><rect width="1024" height="1024" rx="276" fill="#fb923c"/><path d="M216 304Q216 280 239 272L464 208Q488 201 488 226V766Q488 787 468 794L239 858Q216 865 216 840Z" fill="#fff"/><path d="M280 350L424 309V711L280 752Z" fill="#fb923c"/><path d="M536 226Q536 201 560 208L785 272Q808 280 808 304V840Q808 865 785 858L556 794Q536 787 536 766Z" fill="#fff"/><path d="M600 309L744 350V752L600 711Z" fill="#fb923c"/></svg>';
@@ -219,7 +225,7 @@ function framePhone(app: string): void {
   pill.append(dot, document.createTextNode('ispace'));
   shadow.append(bar, pill);
 
-  const setCollapsed = (v: boolean) => {
+  const setCollapsed = (v: boolean, remember = true) => {
     bar.classList.toggle('hidden', v);
     pill.classList.toggle('hidden', !v);
     // 只有展开态才占位；折叠时把页面还原，避免顶部留白
@@ -228,7 +234,9 @@ function framePhone(app: string): void {
       v ? '' : `${HEIGHT}px`,
       'important',
     );
-    try { localStorage.setItem(STORAGE_KEY, v ? '1' : '0'); } catch { /* 隐私模式下会抛，忽略 */ }
+    if (remember) {
+      try { localStorage.setItem(STORAGE_KEY, v ? '0' : '1'); } catch { /* 隐私模式下会抛，忽略 */ }
+    }
   };
 
   pill.addEventListener('click', () => setCollapsed(false));
@@ -305,9 +313,13 @@ function framePhone(app: string): void {
 
   const mount = () => {
     document.documentElement.append(host);
-    let collapsed = false;
-    try { collapsed = localStorage.getItem(STORAGE_KEY) === '1'; } catch { /* 忽略 */ }
-    setCollapsed(collapsed);
+    /*
+      默认收起：页面打开时整屏都是作者的内容，顶部只留一颗小标记，
+      点开才是那条 header。人主动展开过，下次就照他的习惯展开。
+    */
+    let expanded = false;
+    try { expanded = localStorage.getItem(STORAGE_KEY) === '1'; } catch { /* 忽略 */ }
+    setCollapsed(!expanded, false);
   };
 
   /**
