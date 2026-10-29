@@ -254,9 +254,12 @@ export const api = {
   appShares: (appId: string) => get<{ peers: SharePeerInfo[] }>(`/apps/${appId}/shares`),
   revokeShareTo: (appId: string, username: string) =>
     del<{ ok: boolean }>(`/apps/${appId}/shares/${encodeURIComponent(username)}`),
-  /** 切换可见范围。改成「仅自己」会连带收回分享，revoked 是收回条数。 */
+  /**
+   * 切换可见范围。改成「仅自己」会连带收回分享，revoked 是收回条数。
+   * 改成 link 时 linkPath 是私密链接的路径部分（/{owner}/{slug}/?lk=…）。
+   */
   setVisibility: (appId: string, visibility: 'private' | 'public' | 'shared' | 'link') =>
-    patch<{ visibility: string; revoked: number }>(`/apps/${appId}/visibility`, { visibility }),
+    patch<{ visibility: string; revoked: number; linkPath: string | null }>(`/apps/${appId}/visibility`, { visibility }),
   logout: () => post<{ ok: boolean }>('/auth/logout'),
   /** 铸一个手机扫码登录的一次性码。60 秒过期，用一次即毁。 */
   mintQrCode: () => post<{ code: string; expiresIn: number }>('/auth/native/code'),

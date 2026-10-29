@@ -1,4 +1,5 @@
-import { setAppVisibility, shareAppWith } from '../services/visibility.js';
+import { getAppLinkToken, resetAppLink, setAppVisibility, shareAppWith } from '../services/visibility.js';
+import { pageLinkPath } from '../services/link-access.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   API_BASE,
@@ -121,8 +122,33 @@ export function registerShareRoutes(
       throw new IspaceError(ERROR_CODES.INVALID_INPUT, 'visibility 只能是 private / public / shared / link');
     }
 
-    return setAppVisibility(sql, { user: me, appId, visibility: vis, source: 'console', ip: req.ip });
+    const r = await setAppVisibility(sql, { user: me, appId, visibility: vis, source: 'console', ip: req.ip });
+    return { visibility: r.visibility, revoked: r.revoked, linkPath: await linkPathOf(me, appId, r.linkToken) };
   });
+
+  /**
+   * 私密链接（「知道链接的任何人」）。令牌只给作者本人看。
+   * 不是 link 档时 linkPath 为 null。
+   */
+  app.get(`${API_BASE}/apps/:appId/link`, async (req) => {
+    const me = await requireAuth(req);
+    const { appId } = req.params as { appId: string };
+    return { linkPath: await linkPathOf(me, appId, await getAppLinkToken(sql, me, appId)) };
+  });
+
+  /** 重置链接：旧链接和已经发出去的访问 Cookie 立即失效。 */
+  app.post(`${API_BASE}/apps/:appId/link/reset`, async (req) => {
+    const me = await requireAuth(req);
+    const { appId } = req.params as { appId: string };
+    const token = await resetAppLink(sql, { user: me, appId, source: 'console', ip: req.ip });
+    return { linkPath: await linkPathOf(me, appId, token) };
+  });
+
+  async function linkPathOf(me: User, appId: string, token: string | null): Promise<string | null> {
+    if (!token) return null;
+    const [row] = await sql<{ slug: string }[]>`SELECT slug FROM ispace.apps WHERE id = ${appId}`;
+    return row ? pageLinkPath(me.username, row.slug, token) : null;
+  }
 
   /**
    * 某个应用已分享给谁（设计稿分享弹窗里那排人名 chip）。

@@ -55,6 +55,7 @@ export interface SharePeerInfo {
   shareId: string;
   username: string;
   displayName: string;
+  avatarUrl?: string | null;
   status: 'pending' | 'accepted';
 }
 
@@ -398,9 +399,13 @@ export const api = {
   revokeShareTo: (appId: string, username: string) =>
     req<{ ok: boolean }>(`/apps/${appId}/shares/${encodeURIComponent(username)}`, { method: 'DELETE' }),
   setVisibility: (appId: string, visibility: 'private' | 'public' | 'shared' | 'link') =>
-    req<{ visibility: string; revoked: number }>(`/apps/${appId}/visibility`, {
+    req<{ visibility: string; revoked: number; linkPath: string | null }>(`/apps/${appId}/visibility`, {
       method: 'PATCH', body: JSON.stringify({ visibility }),
     }),
+  /** 私密链接的路径部分（/{owner}/{slug}/?lk=…）。不是 link 档时为 null。 */
+  appLink: (appId: string) => req<{ linkPath: string | null }>(`/apps/${appId}/link`),
+  resetAppLink: (appId: string) =>
+    req<{ linkPath: string | null }>(`/apps/${appId}/link/reset`, { method: 'POST' }),
   logout: () => req<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   // ── 管理端 ────────────────────────────────────────────────────────
@@ -500,7 +505,10 @@ export const api = {
     orchestrator: string;
   }>('/backends'),
   updateBackend: (id: string, body: { exposed?: boolean; visibility?: 'private' | 'shared' | 'public' | 'link' }) =>
-    req<{ backend: Backend }>(`/backends/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    req<{ backend: Backend; linkPath: string | null }>(`/backends/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  backendLink: (id: string) => req<{ linkPath: string | null }>(`/backends/${id}/link`),
+  resetBackendLink: (id: string) =>
+    req<{ linkPath: string | null }>(`/backends/${id}/link/reset`, { method: 'POST' }),
   backendShares: (id: string) =>
     req<{ shares: { username: string; displayName: string }[] }>(`/backends/${id}/shares`),
   addBackendShare: (id: string, toUsername: string) =>

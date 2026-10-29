@@ -744,6 +744,8 @@ function Generating({
 }) {
   const [dev, setDev] = useState<Device>('phone');
   const [vis, setVis] = useState<'private' | 'shared' | 'public' | 'link'>('private');
+  /** 选了「知道链接的人」发布之后的私密链接（带令牌）。发布面板复制的是它，不是原地址。 */
+  const [linkUrl, setLinkUrl] = useState<string | null>(null);
   const [follow, setFollow] = useState('');
   const [followImgs, setFollowImgs] = useState<AgentImage[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -1128,8 +1130,12 @@ function Generating({
         谁能看是 apps.visibility 那一列的事（和控制台里改它走同一条接口）。
       */
       let sharingError: string | null = null;
-      try { await api.setVisibility(r.app.id, vis); }
-      catch (e) { sharingError = e instanceof Error ? e.message : '分享设置失败'; }
+      let secretLink: string | null = null;
+      try {
+        const v = await api.setVisibility(r.app.id, vis);
+        secretLink = v.linkPath ? location.origin + v.linkPath : null;
+      } catch (e) { sharingError = e instanceof Error ? e.message : '分享设置失败'; }
+      setLinkUrl(secretLink);
       if (sharingError) {
         setGen((g) => ({ ...g, says: [...g.says, { me: false,
           text: `页面已发布，但分享设置未生效：${sharingError}。请在「我的页面」中重新设置分享。` }] }));
@@ -1138,7 +1144,8 @@ function Generating({
       /* 右栏这就换成正式地址，工作区预览没人看了，收掉它 */
       preview.release();
       setPubOpen(false);
-      onToast(sharingError ? `页面已发布，分享设置失败：${sharingError}` : `已发布到 ${r.url}`);
+      onToast(sharingError ? `页面已发布，分享设置失败：${sharingError}`
+        : secretLink ? '已发布。在「发布」里复制私密链接发给别人，对方免登录可看' : `已发布到 ${r.url}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '发布失败';
       /* 地址上已经有自己另一个页面：问一句，确认了再覆盖（问在 finally 之后，按钮先恢复） */
@@ -1618,7 +1625,7 @@ function Generating({
             {pubOpen && (
               <PublishMenu
                 published={gen.publishedUrl !== null}
-                url={url}
+                url={gen.publishedUrl !== null && linkUrl ? linkUrl : url}
                 device={pubDevice ?? dev}
                 onDevice={setPubDevice}
                 vis={vis}

@@ -186,11 +186,18 @@ export function Backends({ me }: { me: Me }) {
                               { value: 'private', label: '仅自己' },
                               { value: 'shared', label: '指定同事' },
                               { value: 'public', label: '全公司' },
-                              { value: 'link', label: '链接访问（内网免登录）' },
+                              { value: 'link', label: '知道链接的任何人' },
                             ]}
                           />
-                          {b.visibility === 'shared' && (
+                          {(b.visibility === 'shared' || b.visibility === 'link') && (
                             <Button size="sm" variant="ghost" onClick={() => setShareOf(b)}>管理</Button>
+                          )}
+                          {b.visibility === 'link' && (
+                            <Button size="sm" variant="ghost" disabled={busy}
+                              onClick={() => void act(async () => {
+                                const { linkPath } = await api.backendLink(b.id);
+                                if (!linkPath || !(await copyText(location.origin + linkPath))) throw new Error('复制失败，请重试');
+                              }, '私密链接已复制')}>复制链接</Button>
                           )}
                           <Button size="sm" variant="ghost" disabled={busy}
                             onClick={() => void act(() => api.updateBackend(b.id, { exposed: false }), `已从空间收回「${b.name}」`)}>收回</Button>
@@ -199,7 +206,7 @@ export function Backends({ me }: { me: Me }) {
                         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                         <Select value={b.visibility === 'link' ? 'link' : 'private'}
                           onChange={(v) => void act(() => api.updateBackend(b.id, { visibility: v as 'private' | 'link' }), '已更新 API 访问方式')}
-                          items={[{ value: 'private', label: '需登录' }, { value: 'link', label: '内网免登录 API' }]} />
+                          items={[{ value: 'private', label: '需登录' }, { value: 'link', label: '链接分享的页面可免登录调用' }]} />
                         <Button size="sm" variant="ghost" disabled={busy}
                           onClick={() => void act(
                             () => api.updateBackend(b.id, { exposed: true, visibility: 'public' }),
@@ -308,11 +315,13 @@ export function Backends({ me }: { me: Me }) {
 }
 
 /**
- * 管理某个后端的访问名单（visibility=shared 时）。
+ * 管理某个后端的访问名单（visibility=shared 或 link 时）。
  * 后端分享是即时授予、无需对方接受，所以这里加一个人就直接生效。
+ * link 档在名单之上再放进持私密链接的人，重置链接也在这里。
  */
 function BackendShareDialog({ backend, onClose }: { backend: Backend; onClose: () => void }) {
   const [shares, setShares] = useState<{ username: string; displayName: string }[]>([]);
+  const [note, setNote] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -334,12 +343,28 @@ function BackendShareDialog({ backend, onClose }: { backend: Backend; onClose: (
     await api.removeBackendShare(backend.id, u).catch(() => { /* load 会还原 */ });
     load();
   };
+  const resetLink = async () => {
+    setBusy(true); setErr(null); setNote(null);
+    try {
+      const { linkPath } = await api.resetBackendLink(backend.id);
+      const copied = linkPath ? await copyText(location.origin + linkPath) : false;
+      setNote(copied ? '已重置并复制新链接，旧链接已失效。' : '已重置，旧链接已失效。到列表里重新复制链接。');
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   return (
     <Dialog open onClose={onClose} width={460}
       title={`「${backend.name}」可访问的同事`}
-      description="加了就能访问，无需对方接受；这个后端只有这些人和你能打开。"
+      description={backend.visibility === 'link'
+        ? '加了就能访问，无需对方接受；另外持私密链接的人免登录可看。'
+        : '加了就能访问，无需对方接受；这个后端只有这些人和你能打开。'}
     >
+      {backend.visibility === 'link' && (
+        <div style={{ marginBottom: 12 }}>
+          <Button size="sm" disabled={busy} onClick={() => void resetLink()}>重置私密链接</Button>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <Input value={username} placeholder="同事的空间标识，如 lixiao"
           onChange={(e) => setUsername(e.target.value)}
@@ -347,6 +372,7 @@ function BackendShareDialog({ backend, onClose }: { backend: Backend; onClose: (
         <Button variant="primary" disabled={busy || !username.trim()} onClick={add}>添加</Button>
       </div>
       {err && <div style={{ color: 'var(--error)', fontSize: 13, marginBottom: 8 }}>{err}</div>}
+      {note && <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>{note}</div>}
       {shares.length === 0 ? (
         <div style={{ opacity: .6, fontSize: 13 }}>还没有分享给任何人。</div>
       ) : (

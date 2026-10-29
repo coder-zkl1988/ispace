@@ -1128,6 +1128,7 @@ h1{font-size:20px}li{margin:8px 0}a{color:#1c1f23}code{background:#f3f3f3;paddin
   registerSvcProxy(app, {
     sql,
     verifySession: (t) => sessions.verify(t).catch(() => null),
+    secureCookies: PUBLIC_BASE.startsWith('https:'),
   });
 
   // ── 邮箱密码注册与登录 ──────────────────────────────────────────

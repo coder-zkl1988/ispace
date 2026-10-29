@@ -1,9 +1,12 @@
-import { isIntranetRequest } from '../services/intranet.js';
 import { request as httpRequest } from 'node:http';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Sql } from '@ispace/db';
 import { COOKIE_NAME, type SessionClaims } from '@ispace/auth';
 import { readResourceSession } from '../services/resource-session.js';
+import {
+  LINK_COOKIE, appIdFromGrantCookie, isLinkCookie, linkCookie, linkNetworkAllowed, linkTokenMatches,
+  splitLinkParam,
+} from '../services/link-access.js';
 
 /**
  * 后端服务的鉴权代理（/svc/{user}/{name}/...）。
@@ -24,6 +27,12 @@ import { readResourceSession } from '../services/resource-session.js';
  *
  * 三档都已落地：private（仅本人/管理员）、shared（backend_shares 里有授权的
  * 同事）、public（任何登录用户）。加上 API-only 那种共四种判定。
+ *
+ * link（知道链接的任何人）在这之上再放进两类匿名访客：
+ *   - 露出的后端：带着它自己的私密链接（?lk= 或 Path=/svc/{owner}/{name} 的 Cookie）
+ *   - 纯 API 后端：打开了**同一作者**某个链接分享页面的人。页面那边的 authz
+ *     会顺手下发一张 Path=/svc/{owner} 的 Cookie，这里认它——否则匿名访客
+ *     打开了页面，页面里的 fetch 却全是 401。
  */
 
 /**
@@ -47,6 +56,7 @@ interface BackendRow {
   status: string;
   container_name: string | null;
   port: number;
+  link_token: string | null;
 }
 
 export function registerSvcProxy(
@@ -54,6 +64,8 @@ export function registerSvcProxy(
   deps: {
     sql: Sql;
     verifySession: (token: string) => Promise<SessionClaims | null>;
+    /** 链接访问 Cookie 是否加 Secure（线上 https）。 */
+    secureCookies?: boolean;
   },
 ): void {
   const { sql, verifySession } = deps;
@@ -76,7 +88,7 @@ export function registerSvcProxy(
     const { user, name, '*': subpath } = req.params as { user: string; name: string; '*'?: string };
 
     const [row] = await sql<BackendRow[]>`
-      SELECT b.id, b.owner_id, b.exposed, b.visibility, b.status, b.container_name, b.port
+      SELECT b.id, b.owner_id, b.exposed, b.visibility, b.status, b.container_name, b.port, b.link_token
         FROM ispace.backends b
         JOIN ispace.users u ON u.id = b.owner_id
        WHERE u.username = ${user} AND b.name = ${name} AND u.status = 'active'
@@ -92,13 +104,28 @@ export function registerSvcProxy(
 
     // ── 鉴权 ────────────────────────────────────────────────────────
     const claims = await readResourceSession(req, sql, verifySession);
-    const allowed = await isAllowed(row, claims, isIntranetRequest(req));
+    const { token: fromUrl, clean } = splitLinkParam(req.url);
+    const viaLink = row.visibility === 'link' && linkNetworkAllowed(req)
+      && await hasLinkGrant(row, fromUrl ?? req.cookies?.[LINK_COOKIE], req.cookies ?? {});
+    /*
+      露出的后端第一次带着 ?lk= 打开（浏览器导航）：与页面一样换成 Cookie，
+      回到不带令牌的地址。只对 GET 做——别的方法跳转会丢 body。
+    */
+    if (viaLink && fromUrl && req.method === 'GET' && linkTokenMatches(row.link_token, fromUrl)) {
+      return reply.status(302)
+        .header('set-cookie', linkCookie(LINK_COOKIE, fromUrl, `/svc/${user}/${name}`, deps.secureCookies ?? false))
+        .header('referrer-policy', 'no-referrer')
+        .header('cache-control', 'no-store')
+        .header('location', clean)
+        .send();
+    }
+    const allowed = viaLink ? 'ok' : await isAllowed(row, claims);
     if (allowed === 'login') {
       // 页面调 /svc 是 fetch，302 没意义；这里直接 401，让页面自己处理
       return reply.status(401).send({ code: 'UNAUTHENTICATED', message: '请先登录。' });
     }
     if (allowed === 'deny') {
-      return reply.status(403).send({ code: 'FORBIDDEN', message: row.visibility === 'link' ? '请连接公司网络或 VPN 后访问此链接。' : '你没有访问这个服务的权限。' });
+      return reply.status(403).send({ code: 'FORBIDDEN', message: '你没有访问这个服务的权限。' });
     }
 
     /*
@@ -134,7 +161,10 @@ export function registerSvcProxy(
     // Preserve application cookies verbatim, but remove every platform-session occurrence.
     const appCookies = req.headers.cookie?.split(';')
       .map((part) => part.trim())
-      .filter((part) => part && part.split('=', 1)[0]?.trim() !== COOKIE_NAME)
+      .filter((part) => {
+        const cookieName = part.split('=', 1)[0]?.trim() ?? '';
+        return part && cookieName !== COOKIE_NAME && !isLinkCookie(cookieName);
+      })
       .join('; ');
     if (appCookies) headers.cookie = appCookies;
     // 在 loop 之后设，确保 prefix 一定是我算的值。让认这些头的框架
@@ -189,10 +219,34 @@ export function registerSvcProxy(
   /**
    * 能不能访问。返回 'ok' | 'login'（未登录）| 'deny'（登录了但无权）。
    */
+  /**
+   * 匿名访客凭链接能不能进：后端自己的令牌，或者（纯 API 后端）同一作者
+   * 某个仍在链接分享中的页面发的那张 Cookie。
+   */
+  async function hasLinkGrant(
+    row: BackendRow, own: string | undefined | null, cookies: Record<string, string | undefined>,
+  ): Promise<boolean> {
+    if (linkTokenMatches(row.link_token, own)) return true;
+    if (row.exposed) return false;
+    // 最多看 8 张，挡住塞一堆 Cookie 逼服务端逐个查库
+    const grants = Object.entries(cookies)
+      .map(([k, v]) => [appIdFromGrantCookie(k), v] as const)
+      .filter((g): g is readonly [string, string] => Boolean(g[0] && g[1]))
+      .slice(0, 8);
+    for (const [appId, token] of grants) {
+      const [app] = await sql<{ link_token: string | null }[]>`
+        SELECT link_token FROM ispace.apps
+         WHERE id = ${appId} AND owner_id = ${row.owner_id}
+           AND visibility = 'link' AND status <> 'stopped'
+      `;
+      if (linkTokenMatches(app?.link_token, token)) return true;
+    }
+    return false;
+  }
+
   async function isAllowed(
-    row: BackendRow, claims: SessionClaims | null, intranet: boolean,
+    row: BackendRow, claims: SessionClaims | null,
   ): Promise<'ok' | 'login' | 'deny'> {
-    if (row.visibility === 'link') return intranet ? 'ok' : 'deny';
     if (!claims) return 'login';
     // 本人 / 管理员：直接放行
     if (claims.uid === row.owner_id || claims.role === 'admin') return 'ok';
@@ -200,8 +254,8 @@ export function registerSvcProxy(
     if (!row.exposed) return 'ok';
     // 露出的按 visibility 三档
     if (row.visibility === 'public') return 'ok';
-    // shared：得有一条授权记录
-    if (row.visibility === 'shared') {
+    // shared：得有一条授权记录。link 档同样认被授权的同事
+    if (row.visibility === 'shared' || row.visibility === 'link') {
       const [grant] = await sql`
         SELECT 1 FROM ispace.backend_shares
          WHERE backend_id = ${row.id} AND to_user_id = ${claims.uid} LIMIT 1

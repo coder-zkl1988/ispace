@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { resolveFeishuAccount } from '../services/feishu-account.js';
 import { startLogin, consumeLogin } from '../services/oauth-state.js';
-import { setAppVisibility } from '../services/visibility.js';
+import { getAppLinkToken, resetAppLink, setAppVisibility } from '../services/visibility.js';
 import { it, vi } from 'vitest';
 import { pgliteSql } from './pglite-sql.js';
 import type { IdentityClaims } from '@ispace/auth';
@@ -55,16 +55,29 @@ it('Feishu accounts, OAuth state and link visibility use transactional PostgreSQ
     await assert.rejects(consumeLogin(sql,'feishu',attempt.state,attempt.browser));
 
     const app=(await db.query("INSERT INTO ispace.apps(owner_id,slug,name,icon_letter,type) VALUES($1,'page','示例','示','static') RETURNING id",[a.id])).rows[0];
-    vi.stubEnv('ISPACE_INTRANET_CIDRS','192.0.2.0/24');
     await setAppVisibility(sql,{user:a,appId:app.id,visibility:'public',source:'console'});
     assert.equal((await db.query('SELECT count(*)::int n FROM ispace.marketplace_listings WHERE app_id=$1',[app.id])).rows[0].n,1);
     await db.query("INSERT INTO ispace.shares(app_id,from_user_id,to_user_id,status) VALUES($1,$2,$3,'accepted')",[app.id,a.id,old.id]);
     await db.query("INSERT INTO ispace.app_installs(app_id,user_id,source) VALUES($1,$2,'share')",[app.id,old.id]);
+    // 「知道链接的任何人」叠加在邀请之上：下架市场，但受邀同事和他们的入口保留
     const result=await setAppVisibility(sql,{user:a,appId:app.id,visibility:'link',source:'mcp'});
-    assert.equal(result.revoked,1);
+    assert.equal(result.revoked,0);
+    assert.match(result.linkToken ?? '',/^[0-9a-f]{48}$/);
     assert.equal((await db.query('SELECT count(*)::int n FROM ispace.marketplace_listings WHERE app_id=$1',[app.id])).rows[0].n,0);
-    assert.equal((await db.query('SELECT count(*)::int n FROM ispace.app_installs WHERE app_id=$1',[app.id])).rows[0].n,0);
-    assert.equal((await db.query('SELECT visibility FROM ispace.apps WHERE id=$1',[app.id])).rows[0].visibility,'link');
+    assert.equal((await db.query('SELECT count(*)::int n FROM ispace.app_installs WHERE app_id=$1',[app.id])).rows[0].n,1);
+    const row=(await db.query('SELECT visibility, link_token FROM ispace.apps WHERE id=$1',[app.id])).rows[0];
+    assert.equal(row.visibility,'link'); assert.equal(row.link_token,result.linkToken);
+    // 保持 link 不换令牌；重置换一个新的
+    assert.equal((await setAppVisibility(sql,{user:a,appId:app.id,visibility:'link',source:'console'})).linkToken,result.linkToken);
+    const reset=await resetAppLink(sql,{user:a,appId:app.id,source:'console'});
+    assert.notEqual(reset,result.linkToken);
+    assert.equal(await getAppLinkToken(sql,a,app.id),reset);
+    // 切走清空令牌并收回分享；再开启是一条全新的链接
+    assert.equal((await setAppVisibility(sql,{user:a,appId:app.id,visibility:'private',source:'console'})).revoked,1);
+    assert.equal((await db.query('SELECT link_token FROM ispace.apps WHERE id=$1',[app.id])).rows[0].link_token,null);
+    await assert.rejects(resetAppLink(sql,{user:a,appId:app.id,source:'console'}),/没有开启/);
+    const again=await setAppVisibility(sql,{user:a,appId:app.id,visibility:'link',source:'console'});
+    assert.notEqual(again.linkToken,reset);
     await setAppVisibility(sql,{user:a,appId:app.id,visibility:'private',source:'console'});
   } finally { vi.unstubAllEnvs(); await db.close(); }
 }, 30_000);

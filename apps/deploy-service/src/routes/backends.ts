@@ -1,4 +1,4 @@
-import { requireLinkConfiguration } from '../services/visibility.js';
+import { backendLinkPath, newLinkToken } from '../services/link-access.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   API_BASE, DEFAULT_QUOTAS, ERROR_CODES, IspaceError, avatarUrlFor,
@@ -133,12 +133,20 @@ export function registerBackendRoutes(
         }
       }
 
-      if (input.visibility === 'link') requireLinkConfiguration();
+      /*
+        私密链接令牌只在 link 档存在：切进来换新的，保持 link 不动，切走清掉。
+        与页面（services/visibility.ts）同一套语义。
+      */
+      const prev = rows[0] as { exposed: boolean; visibility: string; link_token: string | null };
+      const nextVis = input.visibility ?? prev.visibility;
+      const linkToken = nextVis !== 'link' ? null
+        : prev.visibility === 'link' && prev.link_token ? prev.link_token : newLinkToken();
 
       const updated = await tx`
         UPDATE ispace.backends
-           SET exposed    = ${input.exposed ?? (rows[0] as { exposed: boolean }).exposed},
-               visibility = ${input.visibility ?? (rows[0] as { visibility: string }).visibility}
+           SET exposed    = ${input.exposed ?? prev.exposed},
+               visibility = ${nextVis},
+               link_token = ${linkToken}
          WHERE id = ${id}
         RETURNING *
       `;
@@ -162,7 +170,8 @@ export function registerBackendRoutes(
         await tx`DELETE FROM ispace.backend_installs WHERE backend_id = ${id}`;
       }
 
-      if (input.visibility === 'link' || input.visibility === 'private') {
+      // link 是加在授权同事之上的，只有「仅自己」才收回全部授权
+      if (input.visibility === 'private') {
         await tx`DELETE FROM ispace.backend_shares WHERE backend_id = ${id}`;
       }
 
@@ -185,7 +194,36 @@ export function registerBackendRoutes(
         })
         .catch(() => { /* best-effort */ });
     }
-    return { backend: toBackend(updated[0] as Record<string, unknown>) };
+    const row = updated[0] as { url_path: string; link_token: string | null };
+    return {
+      backend: toBackend(updated[0] as Record<string, unknown>),
+      linkPath: row.link_token ? backendLinkPath(row.url_path, row.link_token) : null,
+    };
+  });
+
+  // ── 私密链接（知道链接的任何人）────────────────────────────────────
+  // 令牌只给作者本人看；重置后旧链接和已发出的访问 Cookie 一起失效。
+  app.get(`${API_BASE}/backends/:id/link`, async (req) => {
+    const me = await requireAuth(req);
+    const { id } = req.params as { id: string };
+    const [row] = await sql<{ url_path: string; visibility: string; link_token: string | null }[]>`
+      SELECT url_path, visibility, link_token FROM ispace.backends WHERE id = ${id} AND owner_id = ${me.id}`;
+    if (!row) throw new IspaceError(ERROR_CODES.NOT_FOUND, '没有这个后端，或它不属于你。');
+    return { linkPath: row.visibility === 'link' && row.link_token ? backendLinkPath(row.url_path, row.link_token) : null };
+  });
+
+  app.post(`${API_BASE}/backends/:id/link/reset`, async (req) => {
+    const me = await requireAuth(req);
+    const { id } = req.params as { id: string };
+    const token = newLinkToken();
+    const [row] = await sql<{ url_path: string; name: string }[]>`
+      UPDATE ispace.backends SET link_token = ${token}
+       WHERE id = ${id} AND owner_id = ${me.id} AND visibility = 'link'
+      RETURNING url_path, name`;
+    if (!row) throw new IspaceError(ERROR_CODES.INVALID_INPUT, '这个后端没有开启「知道链接的任何人」。');
+    await writeAudit(sql, { actorId: me.id, action: 'backend.link_reset', targetType: 'backend', targetId: id,
+      source: 'console', result: 'success', metadata: { name: row.name }, ip: req.ip });
+    return { linkPath: backendLinkPath(row.url_path, token) };
   });
 
   // ── 封面图 ────────────────────────────────────────────────────────
@@ -239,7 +277,7 @@ export function registerBackendRoutes(
       await tx`INSERT INTO ispace.backend_shares (backend_id, to_user_id)
         VALUES (${id}, ${target.id}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE ispace.backends SET visibility = 'shared'
-        WHERE id = ${id} AND visibility IN ('private', 'link')`;
+        WHERE id = ${id} AND visibility = 'private'`;
       await writeAudit(tx, { actorId: me.id, action: 'backend.share', targetType: 'backend', targetId: id,
         source: 'console', result: 'success', metadata: { toUsername }, ip: req.ip });
     });

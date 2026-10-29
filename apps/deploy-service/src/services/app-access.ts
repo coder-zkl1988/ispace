@@ -1,4 +1,5 @@
 import type { Sql } from '@ispace/db';
+import { linkTokenMatches } from './link-access.js';
 
 /**
  * 「这个人能不能看 /{owner}/{slug}/」——全平台唯一的一份判定。
@@ -15,11 +16,16 @@ import type { Sql } from '@ispace/db';
  */
 
 export type AppAccess =
-  | { kind: 'ok'; appId: string; ownerId: string }
+  /** via = 'link'：凭私密链接放进来的（authz 据此下发访问 Cookie）。 */
+  | { kind: 'ok'; appId: string; ownerId: string; via?: 'link' }
   /** 没登录。页面那条路会跳登录页，换令牌那条路回 401。 */
   | { kind: 'login' }
-  /** 登录了，但这个页面没共享给他。 */
-  | { kind: 'forbidden'; reason?: 'network' }
+  /**
+   * 登录了但没共享给他；或者出示了私密链接但不算数：
+   *   network  令牌对，但管理员要求公司网络，而请求不在公司网络内
+   *   link     令牌不对（链接被重置过，或者根本不是这个页面的）
+   */
+  | { kind: 'forbidden'; reason?: 'network' | 'link' }
   /** 不存在、已停用、或者作者已归档。 */
   | { kind: 'notfound' };
 
@@ -28,6 +34,13 @@ interface Row {
   owner_id: string;
   visibility: string;
   status: string;
+  link_token: string | null;
+}
+
+/** 访客出示的私密链接凭据（?lk= 或访问 Cookie），以及这次请求的网络条件。 */
+export interface LinkPresented {
+  token: string | null | undefined;
+  network: boolean;
 }
 
 export async function resolveAppAccess(
@@ -35,10 +48,10 @@ export async function resolveAppAccess(
   owner: string,
   slug: string,
   claims: { uid: string; role: string } | null,
-  intranet = false,
+  link?: LinkPresented,
 ): Promise<AppAccess> {
   const [row] = await sql<Row[]>`
-    SELECT a.id AS app_id, a.owner_id, a.visibility, a.status
+    SELECT a.id AS app_id, a.owner_id, a.visibility, a.status, a.link_token
       FROM ispace.apps a
       JOIN ispace.users u ON u.id = a.owner_id
      WHERE u.username = ${owner} AND a.slug = ${slug}
@@ -51,12 +64,22 @@ export async function resolveAppAccess(
   */
   if (!row || row.status === 'stopped') return { kind: 'notfound' };
 
-  // Link access is never a login bypass for private/shared/public resources.
-  if (row.visibility === 'link') return intranet
-    ? { kind: 'ok', appId: row.app_id, ownerId: row.owner_id }
-    : { kind: 'forbidden', reason: 'network' };
+  /*
+    私密链接只对 link 档生效：private/shared/public 的页面带着一个令牌来，
+    照样走登录那套——令牌不是通用的免登录票。
+    令牌不对时不立刻拒绝，往下走：作者本人、管理员、受邀同事登录后照常能看。
+  */
+  let badLink = false;
+  if (row.visibility === 'link' && link?.token) {
+    if (linkTokenMatches(row.link_token, link.token)) {
+      return link.network
+        ? { kind: 'ok', appId: row.app_id, ownerId: row.owner_id, via: 'link' }
+        : { kind: 'forbidden', reason: 'network' };
+    }
+    badLink = true;
+  }
 
-  if (!claims) return { kind: 'login' };
+  if (!claims) return badLink ? { kind: 'forbidden', reason: 'link' } : { kind: 'login' };
 
   // 本人 / 管理员
   if (claims.uid === row.owner_id || claims.role === 'admin') {
@@ -71,8 +94,8 @@ export async function resolveAppAccess(
     return { kind: 'ok', appId: row.app_id, ownerId: row.owner_id };
   }
 
-  // 指定同事：得有一条已接受的分享
-  if (row.visibility === 'shared') {
+  // 指定同事：得有一条已接受的分享。link 档同样认受邀同事——链接是加在邀请之上的
+  if (row.visibility === 'shared' || row.visibility === 'link') {
     const [share] = await sql`
       SELECT 1 FROM ispace.shares
        WHERE app_id = ${row.app_id} AND to_user_id = ${claims.uid} AND status = 'accepted'

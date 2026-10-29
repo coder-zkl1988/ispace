@@ -1,4 +1,3 @@
-import { isIntranetRequest } from '../services/intranet.js';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { API_BASE, appSlugSchema, ERROR_CODES, IspaceError, usernameSchema, type User } from '@ispace/contracts';
@@ -49,7 +48,7 @@ export function registerPlayRoutes(
       slug: appSlugSchema,
     }).parse(req.body);
 
-    const access = await resolveAppAccess(sql, owner, slug, { uid: me.id, role: me.role }, isIntranetRequest(req));
+    const access = await resolveAppAccess(sql, owner, slug, { uid: me.id, role: me.role });
     if (access.kind === 'notfound') {
       return reply.status(404).send({ code: ERROR_CODES.NOT_FOUND, message: '没有这个页面。' });
     }
@@ -93,10 +92,9 @@ export function registerPlayRoutes(
     const current = await findUserForAuth(sql, s.viewerId);
     const viewer = current?.user;
     const access = await resolveAppAccess(sql, s.owner, s.slug,
-      viewer?.status === 'active' ? { uid: viewer.id, role: viewer.role } : null,
-      isIntranetRequest(req));
+      viewer?.status === 'active' ? { uid: viewer.id, role: viewer.role } : null);
     if (!viewer || viewer.status !== 'active' || current?.tokenEpoch !== s.epoch || access.kind !== 'ok') {
-      return reply.status(403).header('cache-control', 'no-store').send('访问权限已失效，或当前不在公司网络内。');
+      return reply.status(403).header('cache-control', 'no-store').send('访问权限已失效。');
     }
     sessions.touch(s);
 

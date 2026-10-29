@@ -1,10 +1,12 @@
-import { isIntranetRequest } from '../services/intranet.js';
 import type { FastifyInstance } from 'fastify';
 import { API_BASE } from '@ispace/contracts';
 import type { SessionClaims } from '@ispace/auth';
 import type { Sql } from '@ispace/db';
 import { readResourceSession } from '../services/resource-session.js';
 import { resolveAppAccess } from '../services/app-access.js';
+import {
+  LINK_COOKIE, linkCookie, linkGrantCookieName, linkNetworkAllowed, splitLinkParam,
+} from '../services/link-access.js';
 
 /**
  * 静态页面的访问鉴权（Caddy forward_auth 的落点）。
@@ -26,6 +28,7 @@ import { resolveAppAccess } from '../services/app-access.js';
  * 返回约定（Caddy 会把非 2xx 的响应原样回给浏览器）：
  *   200  放行
  *   302  没登录 → 跳登录页，登完回原地
+ *   302  带着正确的 ?lk= → 下发访问 Cookie，回到去掉令牌的同一地址
  *   403  登录了但没权限
  *   404  页面不存在或已停用
  */
@@ -70,9 +73,30 @@ export function registerAuthzRoutes(
       不会报错，它只是多放进来一些人。
     */
     const claims = await readResourceSession(req, sql, verifySession);
-    const access = await resolveAppAccess(sql, owner, slug, claims, isIntranetRequest(req));
+    const { token: fromUrl, clean } = splitLinkParam(uri);
+    const presented = fromUrl ?? req.cookies?.[LINK_COOKIE];
+    const access = await resolveAppAccess(sql, owner, slug, claims,
+      presented ? { token: presented, network: linkNetworkAllowed(req) } : undefined);
 
-    if (access.kind === 'ok') return reply.status(200).send();
+    if (access.kind === 'ok') {
+      /*
+        令牌是从地址里来的：换成 Cookie，再回到不带令牌的地址。
+        两张 Cookie：一张给页面自己（子资源靠它），一张给 /svc/{owner}
+        （页面调作者那些「链接可调用」的纯 API 后端靠它）。
+      */
+      if (access.via === 'link' && fromUrl) {
+        const secure = publicBase.startsWith('https:');
+        return reply.status(302)
+          .header('set-cookie', [
+            linkCookie(LINK_COOKIE, fromUrl, `/${owner}/${slug}`, secure),
+            linkCookie(linkGrantCookieName(access.appId), fromUrl, `/svc/${owner}`, secure),
+          ])
+          .header('referrer-policy', 'no-referrer')
+          .header('location', clean)
+          .send();
+      }
+      return reply.status(200).send();
+    }
     if (access.kind === 'notfound') {
       return reply.status(404).type('text/html; charset=utf-8').send(page404());
     }
@@ -85,6 +109,10 @@ export function registerAuthzRoutes(
     if (access.reason === 'network') {
       return reply.status(403).type('text/html; charset=utf-8').send(shell('仅限公司网络',
         '<h1>请连接公司网络或 VPN</h1><p>这个链接仅允许从公司网络访问，无需登录。连接后刷新页面即可。</p>'));
+    }
+    if (access.reason === 'link') {
+      return reply.status(403).type('text/html; charset=utf-8').send(shell('链接已失效',
+        '<h1>这个链接已经失效</h1><p>作者可能重置了链接，或者关闭了链接访问。找作者要一条新的链接。</p><a href="/">登录我的空间</a>'));
     }
     return reply.status(403).type('text/html; charset=utf-8').send(page403(owner));
   });

@@ -11,7 +11,7 @@ import { registerAuthzRoutes } from '../routes/authz.js';
 
 const binary = process.env.ISPACE_TEST_CADDY;
 describe.skipIf(!binary)('real Caddy link directory routing', () => {
-  it('authorizes before canonical redirect and preserves query strings and relative assets', async () => {
+  it('trades secret links for cookies, authorizes before canonical redirect and preserves query strings and relative assets', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ispace-caddy-review-'));
     const site = join(dir, 'sites', 'owner', 'page');
     await mkdir(site, { recursive: true });
@@ -23,9 +23,8 @@ describe.skipIf(!binary)('real Caddy link directory routing', () => {
     await new Promise<void>(resolve => reserve.close(() => resolve()));
     const origin = `http://127.0.0.1:${port}`;
     let visibility = 'link';
-    const sql = (async () => [{ app_id: 'page', owner_id: 'owner', visibility, status: 'running' }]) as unknown as Sql;
-    vi.stubEnv('ISPACE_INTRANET_CIDRS', '192.0.2.0/24');
-    vi.stubEnv('ISPACE_TRUSTED_PROXY_CIDRS', '127.0.0.1/32');
+    const token = 'e'.repeat(48);
+    const sql = (async () => [{ app_id: 'page', owner_id: 'owner', visibility, status: 'running', link_token: token }]) as unknown as Sql;
     const app = Fastify();
     registerAuthzRoutes(app, { sql, publicBase: origin, verifySession: async () => null });
     const upstream = await app.listen({ port: 0, host: '127.0.0.1' });
@@ -42,7 +41,7 @@ describe.skipIf(!binary)('real Caddy link directory routing', () => {
     });
     let diagnostics = '';
     child.stderr.on('data', chunk => { diagnostics += String(chunk); });
-    const headers = { 'x-forwarded-for': '192.0.2.10' };
+    const headers = { cookie: `ispace_link=${token}` };
     try {
       let ready = false;
       for (let n = 0; n < 50; n++) {
@@ -51,6 +50,11 @@ describe.skipIf(!binary)('real Caddy link directory routing', () => {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       expect(ready, diagnostics).toBe(true);
+      // forward_auth 的 302 必须连同 Set-Cookie 一起回给浏览器，令牌从地址里拿掉
+      const traded = await fetch(origin + `/owner/page?tab=sample&lk=${token}`, { redirect: 'manual' });
+      expect(traded.status).toBe(302);
+      expect(traded.headers.get('location')).toBe('/owner/page?tab=sample');
+      expect(traded.headers.getSetCookie().join('\n')).toContain(`ispace_link=${token}; Path=/owner/page`);
       for (const suffix of ['', '?tab=sample&n=1']) {
         const redirect = await fetch(origin + '/owner/page' + suffix, { headers, redirect: 'manual' });
         expect(redirect.status).toBe(308);
@@ -63,9 +67,8 @@ describe.skipIf(!binary)('real Caddy link directory routing', () => {
         expect(await asset.text()).toContain('window.fixtureLoaded');
         expect(asset.headers.get('cache-control')).toBe('no-store');
       }
-      expect((await fetch(origin + '/owner/page?tab=sample', {
-        headers: { 'x-forwarded-for': '203.0.113.10' }, redirect: 'manual',
-      })).status).toBe(403);
+      expect((await fetch(origin + '/owner/page?tab=sample', { redirect: 'manual' })).status).toBe(302);
+      expect((await fetch(origin + '/owner/page/', { headers: { cookie: `ispace_link=${'f'.repeat(48)}` }, redirect: 'manual' })).status).toBe(403);
       visibility = 'private';
       expect((await fetch(origin + '/owner/page?tab=sample', { headers, redirect: 'manual' })).status).toBe(302);
       expect((await fetch(origin + '/owner/page/app.js', { headers, redirect: 'manual' })).status).toBe(302);

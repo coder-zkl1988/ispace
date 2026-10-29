@@ -40,6 +40,7 @@ import {
   availableFromRows, describeForModel, type ConnectorRow,
 } from '../services/connectors-available.js';
 import { deleteApp } from '../services/app-delete.js';
+import { pageLinkPath } from '../services/link-access.js';
 import type { Orchestrator } from '@ispace/orchestrator';
 import type { DeployService } from '../services/deploy.js';
 
@@ -366,7 +367,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
            WHERE a.owner_id = ${user.id} AND r.id = a.current_release_id
         `;
         const vmap = new Map(cur.map((r) => [r.app_id, r.version]));
-        const vis = { private: '仅自己', public: '全公司', shared: '指定同事', link: '链接访问（内网免登录）' } as const;
+        const vis = { private: '仅自己', public: '全公司', shared: '指定同事', link: '知道链接的任何人' } as const;
         return apps.map((a) => [
           `/${a.slug}`,
           a.name,
@@ -415,7 +416,7 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
         `;
         const rs = await listReleases(sql, a.id);
         const cur = rs.find((r) => r.status === 'active');
-        const vis = { private: '仅自己', public: '全公司（已上架创意市场）', shared: '指定同事', link: '链接访问（内网免登录）' } as const;
+        const vis = { private: '仅自己', public: '全公司（已上架创意市场）', shared: '指定同事', link: '知道链接的任何人' } as const;
         return [
           `${a.name}  /${site}`,
           `地址    ${d.publicBase}/${user.username}/${site}/`,
@@ -649,11 +650,12 @@ export async function registerMcp(app: FastifyInstance, deps: McpDeps): Promise<
         const a = await findApp(sql, user.id, site);
         if (!a) throw new IspaceError(ERROR_CODES.NOT_FOUND, `没有找到应用 /${site}`);
 
-        const { revoked } = await setAppVisibility(sql, { user, appId: a.id, visibility, category, source: 'mcp', ip: clientIp });
-        const label = { private: '仅自己', public: '全公司', shared: '指定同事', link: '链接访问（内网免登录）' }[visibility];
+        const { revoked, linkToken } = await setAppVisibility(sql, { user, appId: a.id, visibility, category, source: 'mcp', ip: clientIp });
+        const label = { private: '仅自己', public: '全公司', shared: '指定同事', link: '知道链接的任何人' }[visibility];
         return `/${site} 的可见范围已设为「${label}」`
           + (revoked ? `，同时收回了 ${revoked} 个分享` : '')
-          + (visibility === 'public' ? '，已上架创意市场' : '');
+          + (visibility === 'public' ? '，已上架创意市场' : '')
+          + (linkToken ? `。私密链接（免登录可看，转发前请确认）：${d.publicBase}${pageLinkPath(user.username, a.slug, linkToken)}` : '');
       }
 
       case 'share-with': {
