@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Release } from '@ispace/contracts';
 import {
-  Button, Card, GENERAL_ACCESS, Icon, Input, ShareDialog, Toast, fmtBytes, fmtDate, generalAccessOf, useConfirm,
-  useCopy, type ConfirmRequest, type ShareVisibility,
+  Button, Card, Icon, Input, ShareDialog, Toast, fmtBytes, fmtDate, useConfirm, useCopy,
+  type ConfirmRequest, type ShareVisibility,
 } from '@ispace/ui';
 import { api, type AppRow, type Me, type SharePeerInfo } from '../api';
 
@@ -21,8 +21,8 @@ type Vis = 'private' | 'shared' | 'public' | 'link';
 
 const VIS_NOTE: Record<Vis, string> = {
   public: '全公司可见，已上架到探索。别人点「做同款」能看到做它的那句话。',
-  shared: '只有你和邀请的同事能打开。',
-  link: '知道私密链接的任何人都能查看，无需登录，不上架探索。',
+  shared: '只有你分享给的用户能打开。',
+  link: '知道私密链接的任何人都能查看，无需登录，不上架市场。',
   private: '只有你自己能打开。',
 };
 
@@ -129,7 +129,7 @@ export function MyPages({ me }: { me: Me }) {
       {sharing && (
         <AppShareDialog
           app={sharing}
-          me={me}
+          owner={me.user.username}
           onClose={() => setSharing(null)}
           onChanged={load}
         />
@@ -161,6 +161,22 @@ function PagePanel({
     void api.releases(app.slug).then((r) => setReleases(r.releases)).catch(() => setReleases([]));
   }, [app.slug]);
   useEffect(loadReleases, [loadReleases]);
+
+  const setVisibility = async (v: Vis) => {
+    setBusy(true);
+    try {
+      await api.setVisibility(app.id, v);
+      setVis(v);
+      onChanged();
+      /*
+        「指定同事」选完还要有人可指定，所以顺手把分享弹窗打开——否则这一下
+        只是把可见范围改窄了，而用户想做的是「给某几个人看」。
+      */
+      /* 公开链接同理：私密链接在弹窗里复制，不打开就拿不到 */
+      if (v === 'shared' || v === 'link') onShare(v);
+      else onMsg(v === 'public' ? '已上架到探索，全公司可见' : '已改为仅自己可见');
+    } catch (e) { onMsg((e as Error).message); } finally { setBusy(false); }
+  };
 
   const rollback = async (v: number) => {
     setBusy(true);
@@ -236,17 +252,28 @@ function PagePanel({
           </a>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', paddingTop: 4 }}>
             <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>谁能看</span>
-            {/*
-              可见范围统一在分享弹窗里改（邀请同事、常规访问权限、私密链接都在那儿），
-              这里只说现状。以前这里平铺四档，与弹窗是两套入口，改一处另一处不跟。
-            */}
-            <span style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)', color: 'var(--text-heading)' }}>
-              {vis === 'private' ? '仅自己' : GENERAL_ACCESS.find((a) => a.value === generalAccessOf(vis))!.label}
-            </span>
-            <Button size="sm" onClick={() => onShare(vis)} disabled={busy}>
-              <Icon name="share2" size={14} />
-              分享
-            </Button>
+            <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 12, background: 'var(--seg-bg)' }}>
+              {([['private', '仅自己'], ['shared', '用户'], ['public', '市场'], ['link', '公开链接']] as const).map(([k, label]) => {
+                const on = vis === k;
+                return (
+                  <button
+                    key={k}
+                    disabled={busy}
+                    onClick={() => void setVisibility(k)}
+                    style={{
+                      height: 30, padding: '0 12px', border: 0, borderRadius: 9,
+                      background: on ? 'var(--surface-1)' : 'transparent',
+                      boxShadow: on ? '0 1px 2px rgba(24,23,21,.08)' : 'none',
+                      color: on ? 'var(--text-heading)' : 'var(--text-tertiary)',
+                      fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)',
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <span style={{ fontSize: 'var(--text-base)', lineHeight: 1.6, color: 'var(--text-tertiary)' }}>
             {VIS_NOTE[vis]}
@@ -348,9 +375,8 @@ function PagePanel({
  * 分享弹窗的数据接线。弹窗本体在 @ispace/ui，门户用的是同一个。
  */
 function AppShareDialog({
-  app, me, onClose, onChanged,
-}: { app: AppRow; me: Me; onClose: () => void; onChanged: () => void }) {
-  const owner = me.user.username;
+  app, owner, onClose, onChanged,
+}: { app: AppRow; owner: string; onClose: () => void; onChanged: () => void }) {
   const [peers, setPeers] = useState<SharePeerInfo[]>([]);
   const [vis, setVis] = useState<ShareVisibility>(app.visibility as ShareVisibility);
   const [linkPath, setLinkPath] = useState<string | null>(null);
@@ -368,7 +394,6 @@ function AppShareDialog({
     <ShareDialog
       open
       appName={app.name}
-      owner={{ name: me.user.displayName || owner, subtitle: owner }}
       shareUrl={`${location.origin}/${owner}/${app.slug}/`}
       linkUrl={linkPath ? location.origin + linkPath : null}
       visibility={vis}
@@ -378,14 +403,9 @@ function AppShareDialog({
         const r = await api.setVisibility(app.id, v);
         setVis(v); setLinkPath(r.linkPath); loadPeers(); onChanged();
       }}
-      onAddPeer={async (u) => {
-        await api.share(app.id, u);
-        // 从「仅自己」邀请人，服务端会收紧成「指定同事」；link / 全公司不变
-        if (vis === 'private') setVis('shared');
-        loadPeers(); onChanged();
-      }}
-      onRemovePeer={async (u) => { await api.revokeShareTo(app.id, u); loadPeers(); onChanged(); }}
       onResetLink={async () => { const r = await api.resetAppLink(app.id); setLinkPath(r.linkPath); }}
+      onAddPeer={async (u) => { await api.share(app.id, u); loadPeers(); onChanged(); }}
+      onRemovePeer={async (u) => { await api.revokeShareTo(app.id, u); loadPeers(); onChanged(); }}
     />
   );
 }

@@ -247,7 +247,7 @@ export function Mine({
   );
 }
 
-const VIS: Record<string, string> = { private: '仅自己', shared: '指定同事', public: '全公司', link: '知道链接的任何人' };
+const VIS: Record<string, string> = { private: '仅自己', shared: '用户', public: '市场', link: '公开链接' };
 
 const Grid = ({ children }: { children: React.ReactNode }) => (
   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '32px 24px' }}>

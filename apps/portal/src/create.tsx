@@ -744,7 +744,7 @@ function Generating({
 }) {
   const [dev, setDev] = useState<Device>('phone');
   const [vis, setVis] = useState<'private' | 'shared' | 'public' | 'link'>('private');
-  /** 选了「知道链接的人」发布之后的私密链接（带令牌）。发布面板复制的是它，不是原地址。 */
+  /** 选了「公开链接」发布之后的私密链接（带令牌）。发布面板复制的是它，不是原地址。 */
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
   const [follow, setFollow] = useState('');
   const [followImgs, setFollowImgs] = useState<AgentImage[]>([]);

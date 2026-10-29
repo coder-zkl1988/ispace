@@ -1372,14 +1372,11 @@ export function PublishMenu({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>谁能看</span>
             <Segment
-              /*
-                「指定同事」不在这里：发布前还没有名单可指定，邀请人在发布后的分享弹窗里做。
-                知道链接的人 = 发布后给一条带私密令牌的链接，持链接免登录可看。
-              */
               options={[
                 { k: 'private', label: '仅自己' },
-                { k: 'public', label: '全公司' },
-                { k: 'link', label: '知道链接的人' },
+                { k: 'shared', label: '用户' },
+                { k: 'public', label: '市场' },
+                { k: 'link', label: '公开链接' },
               ]}
               value={vis}
               onPick={(k) => setVis(k as 'private')}

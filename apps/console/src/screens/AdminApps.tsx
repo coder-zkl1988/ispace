@@ -278,7 +278,7 @@ export function AdminApps() {
 
 function VisibilityBadge({ v }: { v: 'private' | 'shared' | 'public' | 'link' }) {
   if (v === 'public') return <Badge tone="success">全公司</Badge>;
-  if (v === 'link') return <Badge tone="neutral">知道链接的任何人</Badge>;
+  if (v === 'link') return <Badge tone="neutral">公开链接</Badge>;
   if (v === 'shared') return <Badge tone="warning">指定同事</Badge>;
   return <Badge tone="neutral">仅自己</Badge>;
 }

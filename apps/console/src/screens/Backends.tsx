@@ -186,7 +186,7 @@ export function Backends({ me }: { me: Me }) {
                               { value: 'private', label: '仅自己' },
                               { value: 'shared', label: '指定同事' },
                               { value: 'public', label: '全公司' },
-                              { value: 'link', label: '知道链接的任何人' },
+                              { value: 'link', label: '公开链接' },
                             ]}
                           />
                           {(b.visibility === 'shared' || b.visibility === 'link') && (
