@@ -359,6 +359,8 @@ function AboutCard({
     { k: '分类', v: item.category?.trim() || '未分类' },
     { k: '上架', v: new Date(item.published_at).toLocaleDateString('zh-CN') },
     { k: '访问', v: `${fmt(item.visit_count)} 次` },
+    // 没人在线时不摆这一行——「0 人正在用」是噪音，不是信息。
+    ...(item.live_count > 0 ? [{ k: '正在用', v: `${fmt(item.live_count)} 人` }] : []),
   ];
 
   return (

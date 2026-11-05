@@ -34,13 +34,24 @@ export function ForYou({
   onLiked: (appId: string, liked: boolean, count: number) => void;
 }) {
   const ordered = rank(listings, interests);
-  const [i, setI] = useState(0);
+  /*
+   * 游标存 app_id 而不是下标：45 秒轮询会把整份 listings 换成重排后的
+   * 新数组（同事点个喜欢热度就变），按下标定位会让正在看的那页被静默
+   * 换成另一页——预览、地址栏、动作栏的目标全部漂移。按 app_id 找回
+   * 自己的位置，重排只改变邻居，不偷换眼前这页。
+   */
+  const [curId, setCurId] = useState<string | null>(null);
   const [dev, setDev] = useState<Device | null>(null);
   const wide = useInfoWide();
 
   const n = ordered.length;
-  const cur = n ? ordered[((i % n) + n) % n]! : null;
-  const move = (d: number) => { setI((v) => v + d); setDev(null); };
+  const idx = n ? Math.max(0, ordered.findIndex((l) => l.app_id === curId)) : 0;
+  const cur = n ? ordered[((idx % n) + n) % n]! : null;
+  const move = (d: number) => {
+    const next = n ? ordered[(((idx + d) % n) + n) % n] : null;
+    setCurId(next ? next.app_id : null);
+    setDev(null);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,11 +67,10 @@ export function ForYou({
   /* 上下两个邻居的试玩地址提前换好，翻过去就不用等换令牌那一来回 */
   useEffect(() => {
     if (!n) return;
-    const idx = ((i % n) + n) % n;
     warmPlayUrl(ordered[(idx + 1) % n] ?? null);
     warmPlayUrl(ordered[(idx - 1 + n) % n] ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [i, n]);
+  }, [curId, n]);
 
   if (!cur) {
     return (
@@ -116,7 +126,7 @@ export function ForYou({
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <span style={{ fontSize: 'var(--text-card-title)', fontWeight: 'var(--weight-semibold)' }}>为你推荐</span>
           <span className="mono" style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
-            {pad((((i % n) + n) % n) + 1)} / {pad(n)}
+            {pad(idx + 1)} / {pad(n)}
           </span>
         </span>
         <Segment
@@ -192,7 +202,8 @@ export function ForYou({
                 </p>
               )}
               <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
-                {cur.owner_name} · {fmt(cur.install_count)} 人在用
+                {cur.owner_name} · {fmt(cur.install_count)} 人复用
+                {cur.live_count > 0 && ` · ${fmt(cur.live_count)} 人正在用`}
               </span>
               <button
                 onClick={() => onDetail(cur)}

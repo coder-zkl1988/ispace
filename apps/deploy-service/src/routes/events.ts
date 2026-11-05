@@ -676,9 +676,11 @@ export function registerEventRoutes(
            WHERE id = ${appId}
         `;
         await sql`
-          INSERT INTO ispace.marketplace_listings (app_id, published_by)
-          VALUES (${appId}, ${me.id})
-          ON CONFLICT (app_id) DO UPDATE SET published_at = now()
+          INSERT INTO ispace.marketplace_listings (app_id, published_by, install_count)
+          VALUES (${appId}, ${me.id},
+                  (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = ${appId}))
+          ON CONFLICT (app_id) DO UPDATE SET published_at = now(),
+            install_count = (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = ${appId})
         `;
         shared = { madePublic, listed: true };
         await writeAudit(sql, {

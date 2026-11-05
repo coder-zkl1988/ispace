@@ -50,6 +50,8 @@ export interface Listing {
   description: string | null; icon_letter: string; type: string;
   owner_username: string; owner_name: string;
   install_count: number; installed: boolean; mine: boolean;
+  /** 此刻正打开着这个页面的人数（presence 90 秒窗口，去重访客）。 */
+  live_count: number;
   source_prompt: string | null;
   visit_count: number; like_count: number; comment_count: number; liked: boolean;
   category: string | null;

@@ -287,6 +287,10 @@ export function registerSocialRoutes(
                SELECT 1 FROM ispace.app_likes l
                 WHERE l.app_id = a.id AND l.user_id = ${me.id}
              ) AS liked,
+             -- 与 /marketplace 同款在线窗口，作者页卡片与探索墙同一组件
+             (SELECT count(*) FROM ispace.app_presence p
+               WHERE p.app_id = a.id
+                 AND p.last_seen_at > now() - interval '90 seconds') AS live_count,
              (a.owner_id = ${me.id}) AS mine
         FROM ispace.marketplace_listings m
         JOIN ispace.apps  a ON a.id = m.app_id
@@ -310,6 +314,18 @@ export function registerSocialRoutes(
     const sum = (k: 'install_count' | 'visit_count') =>
       apps.reduce((s, a) => s + Number((a as Record<string, unknown>)[k] ?? 0), 0);
 
+    /*
+     * 「N 人复用」按人去重，不把各页 install_count 加总：同一个同事用
+     * 了作者两个页面，加总会说 2 人——那是「人次」，不是「人」。访问量
+     * 那边写的是「次访问」，加总才是对的口径。
+     */
+    const [distinctUsers] = await sql<{ n: string }[]>`
+      SELECT count(DISTINCT i.user_id)::text AS n
+        FROM ispace.app_installs i
+        JOIN ispace.apps a ON a.id = i.app_id
+       WHERE a.owner_id = ${u.id}
+    `;
+
     return {
       profile: {
         ...author(u),
@@ -320,7 +336,7 @@ export function registerSocialRoutes(
         following: !!follow,
         stats: {
           publicApps: apps.length,
-          users: sum('install_count'),
+          users: Number(distinctUsers?.n ?? 0),
           visits: sum('visit_count'),
           followers: Number(counts?.followers ?? 0),
           followees: Number(counts?.followees ?? 0),

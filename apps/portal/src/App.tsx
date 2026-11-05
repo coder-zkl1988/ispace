@@ -195,6 +195,19 @@ function Space() {
     if (r) setListings(r.listings);
   }, []);
 
+  /*
+   * 卡片上的「M 人正在用」是个活数字：presence 窗口 90 秒，这里 45 秒
+   * 静默拉一次，让上下线在一个窗口内反映到墙上。只在页面可见且已登录时
+   * 拉——后台标签页不需要最新数字；未登录/会话过期时 /marketplace 只会
+   * 401，登录页上也没有墙可刷，别白发请求。失败静默，墙保持旧值。
+   */
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (me && document.visibilityState === 'visible') void reloadListings();
+    }, 45_000);
+    return () => clearInterval(t);
+  }, [me, reloadListings]);
+
   useEffect(() => {
     void (async () => {
       const m = await api.me().catch(() => null);

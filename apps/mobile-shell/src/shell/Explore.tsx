@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Dimensions, FlatList, Image, Modal, Pressable, ScrollView, Share,
+  ActivityIndicator, AppState, Dimensions, FlatList, Image, Modal, Pressable, ScrollView, Share,
   StyleSheet, Text, TextInput, View, type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -62,6 +62,23 @@ export function Explore({
       .finally(() => setLoading(false));
   }, [token]);
   useEffect(load, [load]);
+
+  /*
+   * 「M 人正在用」是活数字：presence 窗口 90 秒，这里 45 秒静默刷一次，
+   * 让上下线在一个窗口内反映到流里。RN 没有 visibilitychange，
+   * AppState.active 时才刷，退到后台的 App 不占请求。失败静默保持旧值，
+   * 也不动 loading——那一圈转圈是「首次加载」的意思。
+   */
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (AppState.currentState === 'active') {
+        void api.marketplace(token)
+          .then((r) => setItems(r.listings))
+          .catch(() => undefined);
+      }
+    }, 45_000);
+    return () => clearInterval(t);
+  }, [token]);
 
   /* 正对着的那一张。自动播放只给它换令牌、装 WebView */
   const [current, setCurrent] = useState<string | null>(null);
@@ -254,7 +271,10 @@ function Card({
       {/* 左下那块信息。和动作栏同一条基线 */}
       <View style={[s.info, { bottom: insets.bottom + 108 }]} pointerEvents="none">
         <Text style={s.infoName} numberOfLines={1}>{item.name}</Text>
-        <Text style={s.infoBy} numberOfLines={1}>{item.owner_name} · {item.install_count} 人在用</Text>
+        <Text style={s.infoBy} numberOfLines={1}>
+          {item.owner_name} · {item.install_count} 人复用
+          {item.live_count > 0 ? ` · ${item.live_count} 人正在用` : ''}
+        </Text>
       </View>
     </Pressable>
   );

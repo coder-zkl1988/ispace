@@ -323,7 +323,8 @@ export function WallCard({
           className="num"
           style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}
         >
-          {fmt(item.install_count)} 人在用
+          {fmt(item.install_count)} 人复用
+          {item.live_count > 0 && ` · ${fmt(item.live_count)} 人正在用`}
         </span>
       </div>
 

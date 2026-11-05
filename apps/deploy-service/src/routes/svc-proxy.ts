@@ -59,6 +59,16 @@ interface BackendRow {
   link_token: string | null;
 }
 
+/**
+ * 在线人数的节流表：backend_id|visitor_key → 上次写库时间。
+ * 一次页面打开背后是几十个子路径请求（接口、静态资源），每个请求都 upsert
+ * 一行 presence 纯属浪费；20 秒内同一访客只写一次，卡片的「正在用」窗口
+ * （90 秒）远大于这个间隔，不会因为节流漏人。进程内存即可——丢了顶多
+ * 多写几次库，不丢正确性。
+ */
+const presenceLastSent = new Map<string, number>();
+const PRESENCE_THROTTLE_MS = 20_000;
+
 export function registerSvcProxy(
   app: FastifyInstance,
   deps: {
@@ -139,6 +149,27 @@ export function registerSvcProxy(
     if (req.method === 'GET' && !subpath) {
       void sql`UPDATE ispace.backends SET visit_count = visit_count + 1 WHERE id = ${row.id}`
         .catch(() => undefined);
+    }
+
+    /*
+     * 在线人数：走到这里说明鉴权已过，这个请求本身就是「正在用」的证据。
+     * 与静态页（shell.js 心跳）不同，后端的页面/接口代码我们注入不了，
+     * 请求流是唯一的信号。登录用户按人计；匿名访客（私密链接进来的）
+     * 服务端分不出几个浏览器，合并成一个 a:link 记号——宁可少算也不虚构。
+     * fire-and-forget，与上面访问量同一姿势。
+     */
+    {
+      const vkey = claims ? `u:${claims.uid}` : 'a:link';
+      const throttleKey = `${row.id}|${vkey}`;
+      const last = presenceLastSent.get(throttleKey) ?? 0;
+      if (Date.now() - last > PRESENCE_THROTTLE_MS) {
+        presenceLastSent.set(throttleKey, Date.now());
+        void sql`
+          INSERT INTO ispace.backend_presence (backend_id, visitor_key, last_seen_at)
+          VALUES (${row.id}, ${vkey}, now())
+          ON CONFLICT (backend_id, visitor_key) DO UPDATE SET last_seen_at = now()
+        `.catch(() => undefined);
+      }
     }
 
     // ── 代理 ────────────────────────────────────────────────────────

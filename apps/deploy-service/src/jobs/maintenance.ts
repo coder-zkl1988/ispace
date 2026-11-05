@@ -93,6 +93,14 @@ export function startMaintenanceJobs(app: FastifyInstance, sql: Sql): () => void
     `;
   });
 
+  // ── presence 过期行清理 ────────────────────────────────────────────
+  // 在线窗口（90 秒）之外的行为本就不计数，留着只是占地方。留一天再删，
+  // 万一有时钟回拨或排查需要，还能看到昨天的最后在线时间。
+  every(6, 'presence-gc', async () => {
+    await sql`DELETE FROM ispace.app_presence WHERE last_seen_at < now() - interval '1 day'`;
+    await sql`DELETE FROM ispace.backend_presence WHERE last_seen_at < now() - interval '1 day'`;
+  });
+
   app.log.info('治理定时任务已启动：审计清理(24h) / 闲置归档(24h) / 配额重算(6h)');
 
   return () => { for (const t of timers) { clearTimeout(t); clearInterval(t); } };

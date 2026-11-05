@@ -25,10 +25,22 @@ export async function setAppVisibility(sql: Sql, input: {
     let revoked = 0;
     if (vis === 'public') {
       if (input.category) await tx`UPDATE ispace.apps SET category = ${input.category} WHERE id = ${appId}`;
-      await tx`INSERT INTO ispace.marketplace_listings (app_id, published_by) VALUES (${appId}, ${user.id})
-        ON CONFLICT (app_id) DO UPDATE SET published_at = now()`;
+      // 上架即按事实初始化/校正复用数（与 POST /marketplace 同一条 SQL）：
+      // 0038 的触发器只盯 app_installs 的写，listing 自己插入时不会醒来。
+      // 从 shared 切过来的页面可能已有若干分享接受者，从 0 起算就是虚报。
+      await tx`INSERT INTO ispace.marketplace_listings (app_id, published_by, install_count)
+        VALUES (${appId}, ${user.id},
+                (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = ${appId}))
+        ON CONFLICT (app_id) DO UPDATE SET published_at = now(),
+          install_count = (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = ${appId})`;
     } else {
-      await tx`DELETE FROM ispace.marketplace_listings WHERE app_id = ${appId}`;
+      /*
+       * 删除顺序必须「先 installs 后 listing」：installs 的删除会触发
+       * 0038 触发器去 UPDATE listing 行（installs→listing 的锁序），若这里
+       * 先删 listing 再删 installs，与并发的单条 installs 删除正好围成
+       * 环，PG 报 40P01 死锁（两会话实测复现过）。统一成 installs→listing
+       * 后，所有写路径的锁序同向，环就断了。
+       */
       if (vis === 'private') {
         await tx`DELETE FROM ispace.app_installs WHERE app_id = ${appId}`;
         const rows = await tx`UPDATE ispace.shares SET status = 'revoked', responded_at = now()
@@ -37,6 +49,7 @@ export async function setAppVisibility(sql: Sql, input: {
       } else {
         await tx`DELETE FROM ispace.app_installs WHERE app_id = ${appId} AND source = 'marketplace'`;
       }
+      await tx`DELETE FROM ispace.marketplace_listings WHERE app_id = ${appId}`;
     }
     const linkToken = vis !== 'link' ? null
       : owned.visibility === 'link' && owned.link_token ? owned.link_token : newLinkToken();

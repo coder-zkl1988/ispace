@@ -92,6 +92,25 @@ export async function offboardUser(deps: {
       UPDATE ispace.shares SET status = 'revoked', responded_at = now()
        WHERE from_user_id = ${userId} AND status IN ('pending','accepted')
     `;
+    /*
+     * 离职者**装过别人页面**的引用也要清：他不会再打开任何一个页面，
+     * 留着的唯一效果是把同事卡片上的「N 人复用」永久虚高一位。
+     * install_count 的重算由 0038 触发器顺带完成。
+     *
+     * 但「回收不是销毁」是这里的教义（文件头注释、takedown/restore 同款
+     * 判断）——删之前把行快照存进 offboard_runs.removed_installs，
+     * restore 按快照原样放回，触发器再把各家的计数加回来。
+     */
+    const removedMine = await sql<{ app_id: string; user_id: string; source: string }[]>`
+      DELETE FROM ispace.app_installs WHERE user_id = ${userId}
+      RETURNING app_id, user_id, source
+    `;
+    await sql`
+      UPDATE ispace.offboard_runs
+         SET removed_installs = removed_installs || jsonb_build_object('apps', ${sql.json(removedMine)}::jsonb)
+       WHERE id = ${runId}
+    `;
+    await sql`DELETE FROM ispace.app_presence WHERE visitor_key = ${'u:' + userId}`;
     return `${rows.length} 个页面已停用，产物保留可恢复`;
   });
 
@@ -114,6 +133,18 @@ export async function offboardUser(deps: {
       UPDATE ispace.quotas SET backend_count_used = 0, updated_at = now()
        WHERE user_id = ${userId}
     `;
+    // 与页面同一条理由：离职者不再打开任何后端，引用与在线行都该跟他一起走；
+    // 引用同样先快照再删（restore 放回），见 apps 步注释
+    const removedBe = await sql<{ backend_id: string; user_id: string }[]>`
+      DELETE FROM ispace.backend_installs WHERE user_id = ${userId}
+      RETURNING backend_id, user_id
+    `;
+    await sql`
+      UPDATE ispace.offboard_runs
+         SET removed_installs = removed_installs || jsonb_build_object('backends', ${sql.json(removedBe)}::jsonb)
+       WHERE id = ${runId}
+    `;
+    await sql`DELETE FROM ispace.backend_presence WHERE visitor_key = ${'u:' + userId}`;
     return stopped ? `${stopped} 个后端已停止并解绑` : '没有运行中的后端';
   });
 
@@ -315,8 +346,47 @@ export async function restoreUser(deps: {
        WHERE owner_id = ${userId} AND status = 'stopped'
       RETURNING id
     `;
-    return `${rows.length} 个页面已恢复。后端需要本人自己重建——`
-      + '重建会立刻开始占资源，未必还需要。';
+    /*
+     * 回收时快照进 removed_installs 的引用（他装过别人页面 / 后端的行）
+     * 原样放回：JOIN 到 apps/backends 只为外键安全——作者若已把页面彻底
+     * 删了，那条引用就让它去吧。ON CONFLICT DO NOTHING 盖住「恢复期间
+     * 他自己又重新添加了」的情形，触发器只对真正新增的行 +1，不多算。
+     */
+    const [snap] = await sql<{ removed_installs: {
+      apps?: { app_id: string; user_id: string; source: string }[];
+      backends?: { backend_id: string; user_id: string }[];
+    } | null }[]>`
+      SELECT removed_installs FROM ispace.offboard_runs
+       WHERE user_id = ${userId} AND removed_installs <> '{}'::jsonb
+       ORDER BY started_at DESC LIMIT 1
+    `;
+    let restoredRefs = 0;
+    if (snap?.removed_installs?.apps?.length) {
+      const r = await sql`
+        INSERT INTO ispace.app_installs (app_id, user_id, source)
+        SELECT j.app_id, j.user_id, j.source
+          FROM jsonb_to_recordset(${sql.json(snap.removed_installs.apps)}::jsonb)
+                AS j(app_id uuid, user_id uuid, source text)
+          JOIN ispace.apps a ON a.id = j.app_id
+        ON CONFLICT (app_id, user_id) DO NOTHING
+        RETURNING 1
+      `;
+      restoredRefs += r.length;
+    }
+    if (snap?.removed_installs?.backends?.length) {
+      const r = await sql`
+        INSERT INTO ispace.backend_installs (backend_id, user_id)
+        SELECT j.backend_id, j.user_id
+          FROM jsonb_to_recordset(${sql.json(snap.removed_installs.backends)}::jsonb)
+                AS j(backend_id uuid, user_id uuid)
+          JOIN ispace.backends b ON b.id = j.backend_id
+        ON CONFLICT (backend_id, user_id) DO NOTHING
+        RETURNING 1
+      `;
+      restoredRefs += r.length;
+    }
+    return `${rows.length} 个页面已恢复${restoredRefs ? `、${restoredRefs} 条引用已放回` : ''}。`
+      + '后端需要本人自己重建——重建会立刻开始占资源，未必还需要。';
   });
 
   const okCount = steps.filter((x) => x.ok).length;

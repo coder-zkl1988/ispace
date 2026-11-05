@@ -46,6 +46,12 @@ export function registerMarketplaceRoutes(
                SELECT 1 FROM ispace.app_likes l
                 WHERE l.app_id = m.app_id AND l.user_id = ${me.id}
              ) AS liked,
+             -- 「M 人正在用」：presence 表 90 秒窗口内的去重访客
+             -- （shell.js 每 30 秒心跳）。子查询一张卡算一次，几十张卡
+             -- 的墙也只是一次索引扫，量级无虞。
+             (SELECT count(*) FROM ispace.app_presence p
+               WHERE p.app_id = m.app_id
+                 AND p.last_seen_at > now() - interval '90 seconds') AS live_count,
              (a.owner_id = ${me.id}) AS mine
         FROM ispace.marketplace_listings m
         JOIN ispace.apps  a ON a.id = m.app_id
@@ -82,10 +88,18 @@ export function registerMarketplaceRoutes(
     if (category) {
       await sql`UPDATE ispace.apps SET category = ${category} WHERE id = ${appId}`;
     }
+    /*
+     * 上架即按事实初始化/校正复用数。0038 的触发器只盯 app_installs 的
+     * 写——listing 自己插入时它不会醒来，而一个先被分享给三个人、再上架
+     * 的页面若从默认 0 起算，卡片会硬说「0 人复用」。重新上架（DO UPDATE
+     * 分支）顺手重放一遍，把任何残余漂移也抹平。
+     */
     const rows = await sql`
-      INSERT INTO ispace.marketplace_listings (app_id, published_by)
-      VALUES (${appId}, ${me.id})
-      ON CONFLICT (app_id) DO UPDATE SET published_at = now()
+      INSERT INTO ispace.marketplace_listings (app_id, published_by, install_count)
+      VALUES (${appId}, ${me.id},
+              (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = ${appId}))
+      ON CONFLICT (app_id) DO UPDATE SET published_at = now(),
+        install_count = (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = ${appId})
       RETURNING *
     `;
     await sql`UPDATE ispace.apps SET visibility = 'public' WHERE id = ${appId}`;
@@ -146,12 +160,8 @@ export function registerMarketplaceRoutes(
       VALUES (${appId}, ${me.id}, 'marketplace')
       ON CONFLICT (app_id, user_id) DO NOTHING
     `;
-    // 计数物化，避免列表页每行都做一次 count
-    await sql`
-      UPDATE ispace.marketplace_listings m
-         SET install_count = (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = m.app_id)
-       WHERE m.app_id = ${appId}
-    `;
+    // install_count 由 0038 的增量触发器 ±1 维护（见迁移头注释：为什么
+    // 不在这里显式重算——count(*) 在并发等锁后会写回旧快照值）。
     return { ok: true };
   });
 
@@ -161,11 +171,6 @@ export function registerMarketplaceRoutes(
     await sql`
       DELETE FROM ispace.app_installs
        WHERE app_id = ${appId} AND user_id = ${me.id} AND source = 'marketplace'
-    `;
-    await sql`
-      UPDATE ispace.marketplace_listings m
-         SET install_count = (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = m.app_id)
-       WHERE m.app_id = ${appId}
     `;
     return { ok: true };
   });
@@ -185,11 +190,6 @@ export function registerMarketplaceRoutes(
     const { appId } = req.params as { appId: string };
     await sql`
       DELETE FROM ispace.app_installs WHERE app_id = ${appId} AND user_id = ${me.id}
-    `;
-    await sql`
-      UPDATE ispace.marketplace_listings m
-         SET install_count = (SELECT count(*) FROM ispace.app_installs i WHERE i.app_id = m.app_id)
-       WHERE m.app_id = ${appId}
     `;
     return { ok: true };
   });
@@ -229,6 +229,10 @@ export function registerMarketplaceRoutes(
                SELECT 1 FROM ispace.backend_installs i
                 WHERE i.backend_id = m.backend_id AND i.user_id = ${me.id}
              ) AS installed,
+             -- 与页面同款：svc 代理请求流的 90 秒窗口在线数
+             (SELECT count(*) FROM ispace.backend_presence p
+               WHERE p.backend_id = m.backend_id
+                 AND p.last_seen_at > now() - interval '90 seconds') AS live_count,
              (b.owner_id = ${me.id}) AS mine
         FROM ispace.marketplace_listings m
         JOIN ispace.backends b ON b.id = m.backend_id
@@ -265,11 +269,7 @@ export function registerMarketplaceRoutes(
       VALUES (${backendId}, ${me.id})
       ON CONFLICT (backend_id, user_id) DO NOTHING
     `;
-    await sql`
-      UPDATE ispace.marketplace_listings m
-         SET install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = m.backend_id)
-       WHERE m.backend_id = ${backendId}
-    `;
+    // 计数由 0038 增量触发器维护，不再显式重算（同上）。
     return { ok: true };
   });
 
@@ -279,11 +279,6 @@ export function registerMarketplaceRoutes(
     await sql`
       DELETE FROM ispace.backend_installs
        WHERE backend_id = ${backendId} AND user_id = ${me.id}
-    `;
-    await sql`
-      UPDATE ispace.marketplace_listings m
-         SET install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = m.backend_id)
-       WHERE m.backend_id = ${backendId}
     `;
     return { ok: true };
   });
@@ -308,11 +303,6 @@ export function registerMarketplaceRoutes(
     const { backendId } = req.params as { backendId: string };
     await sql`
       DELETE FROM ispace.backend_installs WHERE backend_id = ${backendId} AND user_id = ${me.id}
-    `;
-    await sql`
-      UPDATE ispace.marketplace_listings m
-         SET install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = m.backend_id)
-       WHERE m.backend_id = ${backendId}
     `;
     return { ok: true };
   });

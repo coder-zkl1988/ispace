@@ -160,14 +160,19 @@ export function registerBackendRoutes(
         只在这次请求真的带了 visibility 时才动——纯改 exposed 不该动市场状态。
       */
       if (input.visibility === 'public') {
+        // 与页面同款：上架即按事实初始化/校正复用数（backend 版）。
         await tx`
-          INSERT INTO ispace.marketplace_listings (backend_id, published_by)
-          VALUES (${id}, ${me.id})
-          ON CONFLICT (backend_id) DO UPDATE SET published_at = now()
+          INSERT INTO ispace.marketplace_listings (backend_id, published_by, install_count)
+          VALUES (${id}, ${me.id},
+                  (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = ${id}))
+          ON CONFLICT (backend_id) DO UPDATE SET published_at = now(),
+            install_count = (SELECT count(*) FROM ispace.backend_installs i WHERE i.backend_id = ${id})
         `;
       } else if (input.visibility !== undefined) {
-        await tx`DELETE FROM ispace.marketplace_listings WHERE backend_id = ${id}`;
+        // 先 installs 后 listing：与 0038 触发器的锁序同向，避免并发死锁
+        // （visibility.ts 同款注释）
         await tx`DELETE FROM ispace.backend_installs WHERE backend_id = ${id}`;
+        await tx`DELETE FROM ispace.marketplace_listings WHERE backend_id = ${id}`;
       }
 
       // link 是加在授权同事之上的，只有「仅自己」才收回全部授权

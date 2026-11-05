@@ -193,7 +193,12 @@ export const marketplaceListingSchema = z.object({
   appId: id,
   publishedBy: id,
   publishedAt: ts,
-  /** 设计稿「23 人在用」。由 app_installs 计数物化而来，避免列表页 N+1。 */
+  /**
+   * 「N 人复用」：把页面添加进自己空间的人数（市场安装 + 分享接受，均去重）。
+   * 由 app_installs 计数物化而来，避免列表页 N+1；重算挂在 0038 的
+   * 触发器上，任何写 installs 的路径（装卸、分享收发、离职清理）都会带新。
+   * 「正在用」是另一个数字——presence 表的 90 秒窗口，见 visits.ts。
+   */
   installCount: z.number().int().nonnegative(),
 });
 export type MarketplaceListing = z.infer<typeof marketplaceListingSchema>;

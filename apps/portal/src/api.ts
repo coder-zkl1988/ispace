@@ -105,6 +105,12 @@ export interface Listing {
   owner_avatar: string | null;
   installed: boolean; mine: boolean;
   category: string | null;
+  /**
+   * 此刻正打开着这个页面的人数（presence 90 秒窗口，去重访客）。
+   * 「复用」是存量，「正在用」是此刻——两个数字摆在一起，
+   * 一个页面火不火、现在有没有人看，一眼都有。
+   */
+  live_count: number;
   /** 页面被打开过多少次（shell.js 每次加载打一下，不去重）。 */
   visit_count: number;
   /** 喜欢数与评论数（物化在 apps 上），以及我自己点过没有。 */

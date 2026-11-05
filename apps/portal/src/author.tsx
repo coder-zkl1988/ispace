@@ -43,7 +43,18 @@ export function Author({
         if (alive) setData(r);
       })
       .catch(() => { if (alive) setMissing(true); });
-    return () => { alive = false; };
+    /*
+     * 卡片上的「M 人正在用」是活数字，作者页不能只取一次快照挂在墙上
+     * 装实时——与 App.tsx 的探索墙同窗口（45 秒、仅页面可见时）静默
+     * 重拉。失败保持旧值，不置 missing（人还在，只是这一次没拉到）。
+     */
+    const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void api.author(username)
+        .then((r) => { seen.set(username, r); if (alive) setData(r); })
+        .catch(() => undefined);
+    }, 45_000);
+    return () => { alive = false; clearInterval(t); };
   }, [username]);
 
   if (missing) {
@@ -84,7 +95,7 @@ export function Author({
 
   const stats: { v: string; k: string }[] = [
     { v: String(profile.stats.publicApps), k: '个公开作品' },
-    { v: fmt(profile.stats.users), k: '人在用' },
+    { v: fmt(profile.stats.users), k: '人复用' },
     { v: fmt(profile.stats.visits), k: '次访问' },
     { v: fmt(profile.stats.followers), k: '关注者' },
   ];

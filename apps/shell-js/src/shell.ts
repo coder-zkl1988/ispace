@@ -30,6 +30,31 @@ const HEIGHT = 44;
  * 几乎每个浏览器里都存着 '0'（展开），按它读就等于默认改不过来。
  */
 const STORAGE_KEY = 'ispace.chrome.expanded';
+/*
+ * 匿名访客的身份证。私密链接「知道链接的任何人」进来的访客没有登录态，
+ * 服务端分不出两个匿名浏览器——所以 shell 在本地生成一个终身随机 ID，
+ * 心跳带上它，「M 人正在用」才能按独立浏览器数对。
+ * 用独立键名而不是复用 STORAGE_KEY：那个键管 header 收起，语义不同，
+ * 将来任何一边改键名都不该牵连另一边。
+ */
+const VISITOR_KEY = 'ispace.visitor';
+
+function visitorId(): string {
+  try {
+    let v = localStorage.getItem(VISITOR_KEY);
+    if (!v) {
+      // crypto.randomUUID 只在安全上下文有；内网 http 部署时退回手搓一个，
+      // 唯一性差一点但足够把两个浏览器分开。
+      v = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(VISITOR_KEY, v);
+    }
+    return v;
+  } catch {
+    return ''; // 隐私模式下 localStorage 会抛：交白卷，服务端按 IP 兜底
+  }
+}
 const API_ME = '/deploy/api/me';
 const LOGIN_URL = '/deploy/api/auth/login';
 const BRAND_MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><rect width="1024" height="1024" rx="276" fill="#fb923c"/><path d="M216 304Q216 280 239 272L464 208Q488 201 488 226V766Q488 787 468 794L239 858Q216 865 216 840Z" fill="#fff"/><path d="M280 350L424 309V711L280 752Z" fill="#fb923c"/><path d="M536 226Q536 201 560 208L785 272Q808 280 808 304V840Q808 865 785 858L556 794Q536 787 536 766Z" fill="#fff"/><path d="M600 309L744 350V752L600 711Z" fill="#fb923c"/></svg>';
@@ -209,6 +234,35 @@ function framePhone(app: string): void {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ owner, slug: app }),
   }).catch(() => { /* 掉一次不影响任何人，不重试 */ });
+
+  /*
+   * 在线人数（presence）：同一发起点，但从「一次加载打一下」升级为
+   * 30 秒一跳的心跳；服务端按「90 秒内有过心跳」算正在用。
+   *   - 只在页面可见时跳：切到后台的标签页不算「正在用」，
+   *     visibilitychange 切回来立刻补一跳，不让刚回来的人凭空消失 90 秒。
+   *   - 不做「关页告别」：同一浏览器开两个标签共享同一访客行，关掉一个
+   *     就删行会把还开着的那个也踢下线；bfcache 进出还会让告别错发。
+   *     离开就停止心跳，行随窗口自然过期——墙 45 秒一刷，滞后可接受。
+   *   - 与访问量同款纪律：fire-and-forget，失败静默，绝不影响页面本身。
+   */
+  const beat = () => {
+    if (document.visibilityState !== 'visible') return;
+    void fetch('/deploy/api/presence/app', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ owner, slug: app, visitor: visitorId() }),
+    }).catch(() => { /* 心跳丢了等下一跳，不重试 */ });
+  };
+  beat();
+  setInterval(beat, 30_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') beat();
+  });
+  /* bfcache 恢复：JS 上下文还在、定时器还在，但离开期间可能错过了一跳，
+     persisted 恢复的瞬间补一跳，别让刚回来的人掉出窗口。 */
+  window.addEventListener('pageshow', (e) => {
+    if ((e as PageTransitionEvent).persisted) beat();
+  });
 
   const host = document.createElement(TAG);
   const shadow = host.attachShadow({ mode: 'closed' });
