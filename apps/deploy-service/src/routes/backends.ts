@@ -11,6 +11,13 @@ import { coverShotAvailable, screenshotUrlToBuffer } from '../services/cover-sho
 import { backendUrlPath, type Orchestrator } from '@ispace/orchestrator';
 
 /**
+ * 正在补截封面的后端 id。截图是 fire-and-forget，cover 写库前状态仍是
+ * NULL——没有这把哨，每次列表视图都会对同一个还没截完的后端再起一个
+ * chromium。
+ */
+const coverCapturing = new Set<string>();
+
+/**
  * 自定义后端（技术方案 §4.4）。
  *
  * 纯网页不需要后端。需要长连接、定时任务、Python 服务时才申请；
@@ -71,6 +78,28 @@ export function registerBackendRoutes(
         if (effective !== b.status) {
           await sql`UPDATE ispace.backends SET status = ${effective} WHERE id = ${b.id}`;
         }
+
+        /*
+         * 还没有封面的 exposed 后端，跑起来之后补截一张。
+         *
+         * 创建时容器还没起来，截不出东西；改可见性那条路（PATCH）会截，
+         * 但「创建时就选了全公司」的人不会走它。挂在状态校准这里，谁
+         * 打开一次后端列表/作品页，就给新跑起来的后端补上封面。
+         * best-effort，失败就等下一次列表视图再试。
+         */
+        if (
+          effective === 'running' && !b.hasCover && b.containerName
+          && coverShotAvailable() && !coverCapturing.has(b.id)
+        ) {
+          coverCapturing.add(b.id);
+          void screenshotUrlToBuffer(`http://${b.containerName}:${b.port}${b.urlPath}/`)
+            .then((png) => {
+              if (png) return sql`UPDATE ispace.backends SET cover = ${png}, cover_updated_at = now() WHERE id = ${b.id}`;
+            })
+            .catch(() => { /* best-effort，下一轮再说 */ })
+            .finally(() => coverCapturing.delete(b.id));
+        }
+
         return { ...b, status: effective, appSlug: b.appId ? slugOf.get(b.appId) ?? null : null };
       }),
     );

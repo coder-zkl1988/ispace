@@ -104,6 +104,8 @@ export function registerMarketplaceRoutes(
       backendListings: backendRows.map(({ owner_avatar_etag, ...r }) => ({
         ...r,
         owner_avatar: avatarUrlFor(r.owner_username as string, owner_avatar_etag as string | null),
+        // 封面直用既有端点（免登录 PNG，墙的观看者本就在登录态内）
+        cover_url: r.has_cover ? `${API_BASE}/backends/${r.backend_id}/cover` : null,
       })),
     };
   });

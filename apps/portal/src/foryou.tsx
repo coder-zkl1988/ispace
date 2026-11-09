@@ -607,22 +607,35 @@ function BackendSlide({
           <div
             style={{
               width: 'min(100%, 560px)', aspectRatio: '4 / 3', borderRadius: 20,
-              background: washOf(b.backend_id), position: 'relative',
+              background: washOf(b.backend_id), position: 'relative', overflow: 'hidden',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               gap: 14, boxShadow: '0 30px 60px -36px rgba(24,23,21,.45), 0 0 0 1px var(--border-subtle)',
             }}
           >
-            <span
-              style={{
-                fontSize: 72, fontFamily: 'var(--font-serif)', fontWeight: 500,
-                color: 'var(--text-heading)', opacity: 0.55, userSelect: 'none',
-              }}
-            >
-              {initial(b.name)}
-            </span>
+            {b.cover_url && (
+              <img
+                src={b.cover_url}
+                alt=""
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            )}
+            {!b.cover_url && (
+              <span
+                style={{
+                  fontSize: 72, fontFamily: 'var(--font-serif)', fontWeight: 500,
+                  color: 'var(--text-heading)', opacity: 0.55, userSelect: 'none',
+                }}
+              >
+                {initial(b.name)}
+              </span>
+            )}
             <span
               className="mono"
-              style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}
+              style={{
+                position: 'absolute', left: 0, right: 0, bottom: 0, padding: '8px 14px',
+                background: b.cover_url ? 'rgba(255,255,255,.82)' : 'transparent',
+                fontSize: 'var(--text-base)', color: 'var(--text-tertiary)', textAlign: 'center',
+              }}
             >
               {location.host}{b.url_path}
             </span>

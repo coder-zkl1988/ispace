@@ -149,6 +149,8 @@ export interface BackendListing {
   category: string | null; name: string; status: string; has_cover: boolean;
   /** 服务地址（/svc/{user}/{name}），exposed 后端浏览器可直接打开。 */
   url_path: string;
+  /** 页面截图封面（平台启动时对 exposed 后端自动截的），没有为 null。 */
+  cover_url: string | null;
   owner_username: string; owner_name: string;
   owner_avatar: string | null;
   installed: boolean; mine: boolean;

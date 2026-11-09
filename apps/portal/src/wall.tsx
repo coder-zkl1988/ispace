@@ -294,21 +294,23 @@ export function BackendWallCard({
           transition: 'transform .25s var(--ease-out-expo), box-shadow .25s',
         }}
       >
-        <Cover src={null} label="" tint={washOf(item.backend_id)} radius={20}>
+        <Cover src={item.cover_url} label="" tint={washOf(item.backend_id)} radius={20}>
           {/*
-            后端不做截图封面（多半没有像样的首屏，编一个反而假）。
-            一枚首字母底板 + 「后端」徽标把身份说清楚，点开就是真页面。
+            有平台自动截的页面截图就用它当封面；还没有截图的新后端
+            回落到首字母底板——一枚底板 + 「后端」徽标把身份说清楚。
           */}
-          <span
-            style={{
-              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', fontSize: 54, fontFamily: 'var(--font-serif)',
-              fontWeight: 500, color: 'var(--text-heading)', opacity: 0.55,
-              pointerEvents: 'none', userSelect: 'none',
-            }}
-          >
-            {initial(item.name)}
-          </span>
+          {!item.cover_url && (
+            <span
+              style={{
+                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 54, fontFamily: 'var(--font-serif)',
+                fontWeight: 500, color: 'var(--text-heading)', opacity: 0.55,
+                pointerEvents: 'none', userSelect: 'none',
+              }}
+            >
+              {initial(item.name)}
+            </span>
+          )}
           <span
             style={{
               position: 'absolute', top: 12, left: 12, height: 24, padding: '0 10px',
