@@ -1,26 +1,33 @@
 import { useState } from 'react';
 import type { App, User } from '@ispace/contracts';
-import { Icon } from '@ispace/ui';
-import { api, type InstalledApp, type PendingShare } from './api';
+import { Icon, StatusDot } from '@ispace/ui';
+import { api, type ExposedBackend, type InstalledApp, type PendingShare } from './api';
 import { Cover, PHONE_RATIO, initial, washOf } from './wall';
 
 /**
  * 我的作品（改版稿 §我的作品）。
  *
- * 三个 tab 对应三种归属，这是改版前「我的页面」那一屏最含糊的地方——
+ * 四个 tab 对应四种归属，这是改版前「我的页面」那一屏最含糊的地方——
  * 自己做的、同事分享的、从探索添加的混在一面墙上，而三者能做的事完全
  * 不同：自己的能改能分享，别人的只能打开和移除。分开之后，卡片下面那排
  * 按钮不用再逐个判断。
+ *
+ * 「后端」是 2026-11 加进来的：D10 曾把后端全部划归控制台，但纯后端
+ * 部署（stirling-pdf 这类）在 portal 里就没有任何踪迹，作者会以为部署
+ * 丢了。这里给一个**只读 + 入口**的展示位——打开 / 复制链接 / 去控制台，
+ * 重部署、日志、改端口仍留在控制台「后端与数据」，管理面不搬。
  */
-type Tab = 'made' | 'shared' | 'added';
+type Tab = 'made' | 'shared' | 'added' | 'backends';
 
 export function Mine({
-  me, apps, installed, shares, onOpen, onManage, onShare, onReload, onToast, onShareDone,
+  me, apps, installed, shares, backends, onReloadBackends, onOpen, onManage, onShare, onReload, onToast, onShareDone,
 }: {
   me: User;
   apps: App[];
   installed: InstalledApp[];
   shares: PendingShare[];
+  backends: ExposedBackend[];
+  onReloadBackends: () => void;
   onOpen: (owner: string, slug: string) => void;
   onManage: (slug: string) => void;
   onShare: (app: App) => void;
@@ -34,11 +41,13 @@ export function Mine({
   const fromShare = installed.filter((i) => i.source === 'share');
   const fromMarket = installed.filter((i) => i.source === 'marketplace');
   const running = apps.filter((a) => a.status === 'running').length;
+  const backendsRunning = backends.filter((b) => b.status === 'running').length;
 
   const tabs: { k: Tab; label: string; n: number }[] = [
     { k: 'made', label: '我做的', n: apps.length },
     { k: 'shared', label: '同事分享', n: fromShare.length },
     { k: 'added', label: '从探索添加', n: fromMarket.length },
+    { k: 'backends', label: '后端', n: backends.length },
   ];
 
   const remove = async (appId: string, name: string) => {
@@ -88,7 +97,10 @@ export function Mine({
               {location.host}/{me.username}
             </span>
             <span>·</span>
-            <span>{apps.length} 个页面 · {running} 个运行中</span>
+            <span>
+              {apps.length} 个页面 · {running} 个运行中
+              {backends.length > 0 && ` · ${backends.length} 个后端${backendsRunning < backends.length ? `（${backendsRunning} 运行中）` : ''}`}
+            </span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -182,7 +194,12 @@ export function Mine({
           return (
             <button
               key={t.k}
-              onClick={() => setTab(t.k)}
+              onClick={() => {
+                setTab(t.k);
+                // 后端状态在服务端是实时问编排器的——每次切进这个 tab 都
+                // 顺手校准一遍，别让「运行中」停留在上一次进页时的说法
+                if (t.k === 'backends') onReloadBackends();
+              }}
               style={{
                 position: 'relative', display: 'flex', alignItems: 'center', gap: 6, height: 46,
                 padding: '0 14px', border: 0, background: 'transparent',
@@ -243,6 +260,107 @@ export function Mine({
           ? <Empty text="在探索里点「添加到我的」，常用的页面会出现在这里。" />
           : <Grid>{fromMarket.map((i) => <InstalledCard key={i.id} item={i} busy={busy} onOpen={onOpen} onRemove={remove} />)}</Grid>
       )}
+
+      {tab === 'backends' && (
+        backends.length === 0
+          ? <Empty text="还没有后端项目。全栈项目在控制台「后端与数据」里创建。" />
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {backends.map((b) => <BackendCard key={b.id} b={b} me={me} onToast={onToast} />)}
+            </div>
+          )
+      )}
+    </div>
+  );
+}
+
+/**
+ * 后端卡。刻意不做截图封面（后端多半没有像样的首屏，编一个反而假），
+ * 用一横条把「它是什么、跑没跑、地址在哪」说清楚；重量级动作都在控制台。
+ */
+function BackendCard({ b, me, onToast }: { b: ExposedBackend; me: User; onToast: (t: string) => void }) {
+  const url = `${location.origin}${b.urlPath}`;
+  const openable = b.exposed && b.status === 'running';
+  const dot = (s: string): 'running' | 'building' | 'stopped' | 'blocked' =>
+    s === 'running' ? 'running' : s === 'creating' ? 'building' : s === 'failed' ? 'blocked' : 'stopped';
+  const label = b.status === 'creating' ? '构建中'
+    : b.status === 'failed' ? '失败'
+    : b.status === 'running' ? '运行中' : '已停止';
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
+        padding: '16px 18px', borderRadius: 18, background: 'var(--surface-1)',
+        border: '1px solid var(--border-subtle)',
+      }}
+    >
+      <span
+        style={{
+          width: 44, height: 44, flex: 'none', borderRadius: 14,
+          background: washOf(b.name), color: 'var(--text-heading)',
+          fontSize: 'var(--text-md)', fontWeight: 'var(--weight-bold)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        {initial(b.name)}
+      </span>
+      <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 'var(--text-md)', fontWeight: 'var(--weight-semibold)', color: 'var(--text-heading)' }}>
+            {b.name}
+          </span>
+          <StatusDot status={dot(b.status)} label={label} />
+          {b.appSlug && (
+            <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
+              服务于 /{me.username}/{b.appSlug}
+            </span>
+          )}
+        </span>
+        <span className="mono" style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
+          {b.exposed ? url : `纯 API 服务 · :${b.port}`}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button
+          disabled={!openable}
+          onClick={() => window.open(url, '_blank', 'noopener')}
+          style={{
+            height: 36, padding: '0 16px', border: 0, borderRadius: 10,
+            background: openable ? 'var(--accent)' : 'var(--surface-2)', color: openable ? 'var(--accent-fg)' : 'var(--text-tertiary)',
+            fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)',
+            cursor: openable ? 'pointer' : 'default',
+          }}
+        >
+          打开
+        </button>
+        {b.exposed && (
+          <button
+            onClick={() => {
+              void navigator.clipboard.writeText(url)
+                .then(() => onToast('链接已复制'))
+                .catch(() => onToast('复制失败'));
+            }}
+            style={{
+              height: 36, padding: '0 14px', border: '1px solid var(--border-hover)', borderRadius: 10,
+              background: 'transparent', color: 'var(--text-secondary)',
+              fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)', cursor: 'pointer',
+            }}
+          >
+            复制链接
+          </button>
+        )}
+        <a
+          href="/console#/backends"
+          style={{
+            display: 'flex', alignItems: 'center', height: 36, padding: '0 14px',
+            border: '1px solid var(--border-hover)', borderRadius: 10,
+            color: 'var(--text-secondary)', fontSize: 'var(--text-base)',
+            fontWeight: 'var(--weight-semibold)', textDecoration: 'none',
+          }}
+        >
+          控制台管理
+        </a>
+      </div>
     </div>
   );
 }

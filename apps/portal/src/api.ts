@@ -156,9 +156,21 @@ export interface InstalledBackend {
   owner_username: string; owner_name: string;
 }
 
+/**
+ * 我名下的一个后端项目（GET /backends，与控制台「后端与数据」同一接口）。
+ *
+ * status 不是库里那条旧值：服务端在返回前向编排器实时校准过（容器挂了
+ * 库里还写着 running 的事，在这里已经被拉直），所以作品页敢把「运行中」
+ * 三个字亮出来。原先只有分享弹窗要的几个字段，作品页还要状态文案、
+ * 端口和「服务于哪个页面」，一并补上。
+ */
 export interface ExposedBackend {
   id: string; name: string; urlPath: string; status: string;
   visibility: 'private' | 'shared' | 'public' | 'link'; exposed: boolean; hasCover: boolean;
+  /** 服务于哪个页面。null = 没关联（独立的纯后端项目）。 */
+  appSlug?: string | null;
+  port?: number;
+  createdAt?: string;
 }
 
 export interface AuthPolicy {

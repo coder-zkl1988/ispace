@@ -17,6 +17,7 @@ import { Explore, playInNewTab } from './explore';
 import { Detail } from './detail';
 import { Author } from './author';
 import { Mine } from './mine';
+import type { ExposedBackend } from './api';
 import { ForYou } from './foryou';
 import { Create } from './create';
 import { Login, ResetPassword } from './login';
@@ -109,6 +110,7 @@ function Space() {
   const [apps, setApps] = useState<AppEntity[]>([]);
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [shares, setShares] = useState<PendingShare[]>([]);
+  const [backends, setBackends] = useState<ExposedBackend[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [interests, setInterests] = useState<Interest[]>([]);
   const [q, setQ] = useState('');
@@ -180,14 +182,18 @@ function Space() {
   }, []);
 
   const reloadMine = useCallback(async () => {
-    const [a, i, s] = await Promise.all([
+    const [a, i, s, b] = await Promise.all([
       api.apps().catch(() => null),
       api.installed().catch(() => null),
       api.pendingShares().catch(() => null),
+      // 后端项目的状态在这里顺带校准（服务端逐个问编排器）；失败静默，
+      // 「后端」tab 拿到旧值也比空着强
+      api.backends().catch(() => null),
     ]);
     if (a) setApps(a.apps);
     if (i) setInstalled(i.installed);
     if (s) setShares(s.shares);
+    if (b) setBackends(b.backends);
   }, []);
 
   const reloadListings = useCallback(async () => {
@@ -318,6 +324,8 @@ function Space() {
             apps={apps}
             installed={installed}
             shares={shares}
+            backends={backends}
+            onReloadBackends={() => void reloadMine()}
             onOpen={(owner, slug) => { window.open(`/${owner}/${slug}/`, '_blank', 'noopener'); }}
             onManage={(slug) => { location.href = `/console#page=${encodeURIComponent(slug)}`; }}
             onShare={(a) => { location.href = `/console#page=${encodeURIComponent(a.slug)}`; }}
