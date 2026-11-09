@@ -17,7 +17,7 @@ import { Explore, playInNewTab } from './explore';
 import { Detail } from './detail';
 import { Author } from './author';
 import { Mine } from './mine';
-import type { ExposedBackend } from './api';
+import type { BackendListing, ExposedBackend } from './api';
 import { ForYou } from './foryou';
 import { Create } from './create';
 import { Login, ResetPassword } from './login';
@@ -112,6 +112,7 @@ function Space() {
   const [shares, setShares] = useState<PendingShare[]>([]);
   const [backends, setBackends] = useState<ExposedBackend[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
+  const [backendListings, setBackendListings] = useState<BackendListing[]>([]);
   const [interests, setInterests] = useState<Interest[]>([]);
   const [q, setQ] = useState('');
   const [toast, setToast] = useState<string | null>(null);
@@ -198,7 +199,10 @@ function Space() {
 
   const reloadListings = useCallback(async () => {
     const r = await api.marketplace().catch(() => null);
-    if (r) setListings(r.listings);
+    if (r) {
+      setListings(r.listings);
+      setBackendListings(r.backendListings ?? []);
+    }
   }, []);
 
   /*
@@ -297,6 +301,7 @@ function Space() {
         return (
           <Explore
             listings={listings}
+            backendListings={backendListings}
             q={q}
             onClearQ={() => setQ('')}
             onOpen={openDetail}
@@ -415,6 +420,7 @@ function Space() {
       {route.k === 'foryou' ? (
         <ForYou
           listings={listings}
+          backendListings={backendListings}
           interests={interests}
           onDetail={openDetail}
           onAuthor={openAuthor}

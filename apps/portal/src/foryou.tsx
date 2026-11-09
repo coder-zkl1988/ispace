@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { exploreBucket, type Interest } from '@ispace/contracts';
 import { Icon, MarkLoading, copyText } from '@ispace/ui';
-import { api, type Listing } from './api';
+import { api, type BackendListing, type Listing } from './api';
 import { Segment } from './detail';
-import { PHONE_RATIO, appHref, deviceOf, fmt, initial, usePlay, warmPlayUrl, washOf, type Device } from './wall';
+import { PHONE_RATIO, appHref, deviceOf, fmt, initial, recKey, usePlay, warmPlayUrl, washOf, type Device, type RecItem } from './wall';
 import { Cover } from './wall';
 
 /**
@@ -22,9 +22,10 @@ import { Cover } from './wall';
  * detail.tsx 那段方框注释）。
  */
 export function ForYou({
-  listings, interests, onDetail, onAuthor, onRemix, onToast, onInstalled, onLiked,
+  listings, backendListings = [], interests, onDetail, onAuthor, onRemix, onToast, onInstalled, onLiked,
 }: {
   listings: Listing[];
+  backendListings?: BackendListing[];
   interests: Interest[];
   onDetail: (l: Listing) => void;
   onAuthor: (username: string) => void;
@@ -33,23 +34,23 @@ export function ForYou({
   onInstalled: () => void;
   onLiked: (appId: string, liked: boolean, count: number) => void;
 }) {
-  const ordered = rank(listings, interests);
+  const ordered = rankAll(listings, backendListings, interests);
   /*
-   * 游标存 app_id 而不是下标：45 秒轮询会把整份 listings 换成重排后的
-   * 新数组（同事点个喜欢热度就变），按下标定位会让正在看的那页被静默
-   * 换成另一页——预览、地址栏、动作栏的目标全部漂移。按 app_id 找回
-   * 自己的位置，重排只改变邻居，不偷换眼前这页。
+   * 游标存稳定 key（app:xxx / backend:xxx）而不是下标：45 秒轮询会把整份
+   * 数据换成重排后的新数组（同事点个喜欢热度就变），按下标定位会让正在
+   * 看的那页被静默换成另一页——预览、地址栏、动作栏的目标全部漂移。按
+   * key 找回自己的位置，重排只改变邻居，不偷换眼前这页。
    */
   const [curId, setCurId] = useState<string | null>(null);
   const [dev, setDev] = useState<Device | null>(null);
   const wide = useInfoWide();
 
   const n = ordered.length;
-  const idx = n ? Math.max(0, ordered.findIndex((l) => l.app_id === curId)) : 0;
+  const idx = n ? Math.max(0, ordered.findIndex((r) => recKey(r) === curId)) : 0;
   const cur = n ? ordered[((idx % n) + n) % n]! : null;
   const move = (d: number) => {
     const next = n ? ordered[(((idx + d) % n) + n) % n] : null;
-    setCurId(next ? next.app_id : null);
+    setCurId(next ? recKey(next) : null);
     setDev(null);
   };
 
@@ -64,11 +65,13 @@ export function ForYou({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  /* 上下两个邻居的试玩地址提前换好，翻过去就不用等换令牌那一来回 */
+  /* 上下两个邻居的试玩地址提前换好，翻过去就不用等换令牌那一来回。
+     后端没有试玩地址（打开就是 /svc 本页），邻居是它时直接跳过。 */
   useEffect(() => {
     if (!n) return;
-    warmPlayUrl(ordered[(idx + 1) % n] ?? null);
-    warmPlayUrl(ordered[(idx - 1 + n) % n] ?? null);
+    const nextApp = (o: typeof ordered[0] | undefined) => (o && o.kind === 'app' ? o.l : null);
+    warmPlayUrl(nextApp(ordered[(idx + 1) % n]));
+    warmPlayUrl(nextApp(ordered[(idx - 1 + n) % n]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curId, n]);
 
@@ -80,35 +83,45 @@ export function ForYou({
           background: 'var(--surface-canvas)', color: 'var(--text-tertiary)', fontSize: 'var(--text-md)',
         }}
       >
-        还没有可以推荐的页面。先去探索看看，或者自己做一个。
+        还没有可以推荐的作品。先去探索看看，或者自己做一个。
       </div>
     );
   }
 
-  const d = dev ?? deviceOf(cur.type);
-  const tint = washOf(cur.app_id);
+  /* 后端项没有「手机/电脑」与真页面预览（iframe 嵌 /svc 受制于它自己的
+     CSP，不可靠）——走海报版式：首字母底板 + 打开/添加/复制链接。 */
+  if (cur.kind === 'backend') {
+    return <BackendSlide
+      b={cur.b} idx={idx} n={n} move={move}
+      onAuthor={onAuthor} onToast={onToast} onInstalled={onInstalled}
+    />;
+  }
+
+  const l = cur.l;
+  const d = dev ?? deviceOf(l.type);
+  const tint = washOf(l.app_id);
 
   const toggleLike = async () => {
     try {
-      const r = cur.liked ? await api.unlike(cur.app_id) : await api.like(cur.app_id);
-      onLiked(cur.app_id, r.liked, r.likeCount);
+      const r = l.liked ? await api.unlike(l.app_id) : await api.like(l.app_id);
+      onLiked(l.app_id, r.liked, r.likeCount);
     } catch { onToast('没点上，重试一下'); }
   };
   const toggleAdd = async () => {
     try {
-      if (cur.mine) { onToast('这是你自己的页面'); return; }
-      if (cur.installed) {
-        await api.uninstallFromMarket(cur.app_id);
+      if (l.mine) { onToast('这是你自己的页面'); return; }
+      if (l.installed) {
+        await api.uninstallFromMarket(l.app_id);
         onToast('已从「我的作品」移除');
       } else {
-        await api.installFromMarket(cur.app_id);
+        await api.installFromMarket(l.app_id);
         onToast('已添加到「我的作品」');
       }
       onInstalled();
     } catch { onToast('没成功，重试一下'); }
   };
   const share = async () => {
-    const url = `${location.origin}${appHref(cur)}`;
+    const url = `${location.origin}${appHref(l)}`;
     onToast(await copyText(url) ? '链接已复制，发给同事就能打开' : url);
   };
 
@@ -182,7 +195,7 @@ export function ForYou({
                     fontSize: 'var(--text-base)', display: 'flex', alignItems: 'center',
                   }}
                 >
-                  {exploreBucket(cur.category)}
+                  {exploreBucket(l.category)}
                 </span>
               </div>
               <h2
@@ -194,19 +207,19 @@ export function ForYou({
                   lineHeight: 1.1, color: 'var(--text-heading)',
                 }}
               >
-                {cur.name}
+                {l.name}
               </h2>
-              {cur.description && (
+              {l.description && (
                 <p style={{ margin: 0, fontSize: 'var(--text-md)', lineHeight: 1.7, color: 'var(--text-secondary)', textWrap: 'pretty' }}>
-                  {cur.description}
+                  {l.description}
                 </p>
               )}
               <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
-                {cur.owner_name} · {fmt(cur.install_count)} 人复用
-                {cur.live_count > 0 && ` · ${fmt(cur.live_count)} 人正在用`}
+                {l.owner_name} · {fmt(l.install_count)} 人复用
+                {l.live_count > 0 && ` · ${fmt(l.live_count)} 人正在用`}
               </span>
               <button
-                onClick={() => onDetail(cur)}
+                onClick={() => onDetail(l)}
                 style={{
                   alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, height: 40,
                   padding: '0 12px 0 16px', border: '1px solid var(--border-hover)', borderRadius: 12,
@@ -231,7 +244,7 @@ export function ForYou({
               }}
             >
               <div style={{ position: 'relative', width: '100%', height: '100%', borderRadius: 34, overflow: 'hidden' }}>
-                <Frame key={cur.app_id} item={cur} tint={tint} />
+                <Frame key={l.app_id} item={l} tint={tint} />
               </div>
             </div>
           ) : (
@@ -260,12 +273,12 @@ export function ForYou({
                     color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden',
                   }}
                 >
-                  {location.host}{appHref(cur)}
+                  {location.host}{appHref(l)}
                 </span>
                 <div style={{ width: 46 }} />
               </div>
               <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-                <Frame key={cur.app_id} item={cur} tint={tint} />
+                <Frame key={l.app_id} item={l} tint={tint} />
               </div>
             </div>
           )}
@@ -282,29 +295,29 @@ export function ForYou({
           <Round title="下一个" icon="chevDown" onClick={() => move(1)} />
           <div style={{ height: 10 }} />
           <button
-            onClick={() => onAuthor(cur.owner_username)}
-            title={cur.owner_name}
+            onClick={() => onAuthor(l.owner_username)}
+            title={l.owner_name}
             style={{
               width: 46, height: 46, border: 0,
-              borderRadius: 'var(--radius-pill)', background: washOf(cur.owner_username),
+              borderRadius: 'var(--radius-pill)', background: washOf(l.owner_username),
               color: 'var(--text-heading)', fontSize: 'var(--text-lg)',
               fontWeight: 'var(--weight-bold)', cursor: 'pointer',
             }}
           >
-            {initial(cur.owner_name)}
+            {initial(l.owner_name)}
           </button>
           <Rail
-            icon="heart" filled={cur.liked} label={fmt(cur.like_count)} title="喜欢"
-            color={cur.liked ? 'var(--tabby-orange)' : 'var(--text-primary)'} onClick={() => void toggleLike()}
+            icon="heart" filled={l.liked} label={fmt(l.like_count)} title="喜欢"
+            color={l.liked ? 'var(--tabby-orange)' : 'var(--text-primary)'} onClick={() => void toggleLike()}
           />
           <Rail
-            icon={cur.mine ? 'grid' : cur.installed ? 'check' : 'plus'}
-            label={cur.mine ? '我的' : cur.installed ? '已添加' : '添加'}
+            icon={l.mine ? 'grid' : l.installed ? 'check' : 'plus'}
+            label={l.mine ? '我的' : l.installed ? '已添加' : '添加'}
             title="添加到我的作品" color="var(--text-primary)" onClick={() => void toggleAdd()}
           />
           <Rail icon="link" label="分享" title="复制链接" color="var(--text-primary)" onClick={() => void share()} />
-          {cur.source_prompt && (
-            <Rail icon="remix" label="做同款" title="做同款" color="var(--text-primary)" onClick={() => onRemix(cur)} />
+          {l.source_prompt && (
+            <Rail icon="remix" label="做同款" title="做同款" color="var(--text-primary)" onClick={() => onRemix(l)} />
           )}
         </div>
       </div>
@@ -445,4 +458,206 @@ export function rank(list: Listing[], interests: Interest[]): Listing[] {
     if (pa !== pb) return pb - pa;
     return heat(b) - heat(a);
   });
+}
+
+/**
+ * 推荐流的完整版：页面照 rank 排，后端按同款热度公式参加排序
+ * （没有喜欢体系，去掉喜欢×3 那一项），两路合并成一条流。
+ * 页面与后端同热度时页面在前——这一屏的主角仍是页面。
+ */
+export function rankAll(
+  list: Listing[], backs: BackendListing[], interests: Interest[],
+): RecItem[] {
+  const apps: RecItem[] = rank(list, interests).map((l) => ({ kind: 'app', l }));
+  const want = new Set<string>(interests);
+  const heat = (b: BackendListing) =>
+    Number(b.install_count) * 2 + Number(b.visit_count) / 50;
+  const bes: RecItem[] = [...backs]
+    .sort((x, y) => {
+      const px = want.has(exploreBucket(x.category)) ? 1 : 0;
+      const py = want.has(exploreBucket(y.category)) ? 1 : 0;
+      if (px !== py) return py - px;
+      return heat(y) - heat(x);
+    })
+    .map((b) => ({ kind: 'backend', b }));
+  return [...apps, ...bes].sort((x, y) => {
+    const px = x.kind === 'app' ? 1 : 0;
+    const py = y.kind === 'app' ? 1 : 0;
+    if (px !== py) return py - px;
+    return 0;
+  });
+}
+
+/**
+ * 推荐流里的后端一页。
+ *
+ * 不做真页面预览（iframe 嵌 /svc 受制于服务自身的 CSP/框架头，不可靠），
+ * 海报版式把「这是什么、谁做的、多少人复用」说清，动作只有三个：
+ * 打开（新窗口直进 /svc）、添加/移除、复制链接。
+ */
+function BackendSlide({
+  b, idx, n, move, onAuthor, onToast, onInstalled,
+}: {
+  b: BackendListing;
+  idx: number;
+  n: number;
+  move: (d: number) => void;
+  onAuthor: (username: string) => void;
+  onToast: (t: string) => void;
+  onInstalled: () => void;
+}) {
+  const pad = (v: number) => (v < 10 ? `0${v}` : String(v));
+  const toggleAdd = async () => {
+    try {
+      if (b.mine) { onToast('这是你自己部署的后端'); return; }
+      if (b.installed) {
+        await api.uninstallBackendFromMarket(b.backend_id);
+        onToast('已从「我的作品」移除');
+      } else {
+        await api.installBackendFromMarket(b.backend_id);
+        onToast('已添加到「我的作品」');
+      }
+      onInstalled();
+    } catch { onToast('没成功，重试一下'); }
+  };
+  const share = async () => {
+    const url = `${location.origin}${b.url_path}`;
+    onToast(await copyText(url) ? '链接已复制，发给同事就能打开' : url);
+  };
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--surface-canvas)', color: 'var(--text-heading)' }}>
+      <div
+        style={{
+          height: 64, flex: 'none', display: 'grid',
+          gridTemplateColumns: 'minmax(0,1fr) auto minmax(0,1fr)',
+          alignItems: 'center', gap: 16, padding: '0 24px',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <span style={{ fontSize: 'var(--text-card-title)', fontWeight: 'var(--weight-semibold)' }}>为你推荐</span>
+          <span className="mono" style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
+            {pad(idx + 1)} / {pad(n)}
+          </span>
+        </span>
+        <span
+          style={{
+            height: 26, padding: '0 11px', borderRadius: 'var(--radius-pill)',
+            background: 'var(--surface-2)', color: 'var(--text-secondary)',
+            fontSize: 'var(--text-base)', display: 'flex', alignItems: 'center', gap: 5,
+          }}
+        >
+          <Icon name="db" size={12} />后端
+        </span>
+        <span style={{ justifySelf: 'end', fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
+          ↑ ↓ 键切换
+        </span>
+      </div>
+
+      <div
+        style={{
+          flex: 1, minHeight: 0, display: 'grid',
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,2fr) auto',
+          gridTemplateRows: 'minmax(0,1fr)', alignItems: 'center', gap: 40, padding: '0 40px 20px',
+        }}
+      >
+        <div
+          style={{
+            alignSelf: 'end', justifySelf: 'end', width: '100%', maxWidth: 340,
+            display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 8,
+          }}
+        >
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span
+              style={{
+                height: 26, padding: '0 11px', borderRadius: 'var(--radius-pill)',
+                background: 'var(--surface-2)', color: 'var(--text-secondary)',
+                fontSize: 'var(--text-base)', display: 'flex', alignItems: 'center',
+              }}
+            >
+              {exploreBucket(b.category)}
+            </span>
+          </div>
+          <h2
+            style={{
+              margin: 0, fontFamily: 'var(--font-serif)', fontWeight: 500,
+              fontSize: 'clamp(28px, 2.4vw, 42px)', lineHeight: 1.1, color: 'var(--text-heading)',
+            }}
+          >
+            {b.name}
+          </h2>
+          <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}>
+            {b.owner_name} · {fmt(b.install_count)} 人复用
+            {b.live_count > 0 && ` · ${fmt(b.live_count)} 人正在用`}
+          </span>
+          <button
+            onClick={() => window.open(b.url_path, '_blank', 'noopener')}
+            style={{
+              alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, height: 40,
+              padding: '0 16px', border: 0, borderRadius: 12,
+              background: 'var(--cta)', color: 'var(--cta-fg)', fontSize: 'var(--text-base)',
+              fontWeight: 'var(--weight-semibold)', cursor: 'pointer',
+            }}
+          >
+            打开<Icon name="upRight" size={15} />
+          </button>
+        </div>
+
+        <div style={{ height: '100%', minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div
+            style={{
+              width: 'min(100%, 560px)', aspectRatio: '4 / 3', borderRadius: 20,
+              background: washOf(b.backend_id), position: 'relative',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 14, boxShadow: '0 30px 60px -36px rgba(24,23,21,.45), 0 0 0 1px var(--border-subtle)',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 72, fontFamily: 'var(--font-serif)', fontWeight: 500,
+                color: 'var(--text-heading)', opacity: 0.55, userSelect: 'none',
+              }}
+            >
+              {initial(b.name)}
+            </span>
+            <span
+              className="mono"
+              style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)' }}
+            >
+              {location.host}{b.url_path}
+            </span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            alignSelf: 'end', justifySelf: 'start', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 18, paddingBottom: 8,
+          }}
+        >
+          <Round title="上一个" icon="chevUp" onClick={() => move(-1)} />
+          <Round title="下一个" icon="chevDown" onClick={() => move(1)} />
+          <div style={{ height: 10 }} />
+          <button
+            onClick={() => onAuthor(b.owner_username)}
+            title={b.owner_name}
+            style={{
+              width: 46, height: 46, border: 0,
+              borderRadius: 'var(--radius-pill)', background: washOf(b.owner_username),
+              color: 'var(--text-heading)', fontSize: 'var(--text-lg)',
+              fontWeight: 'var(--weight-bold)', cursor: 'pointer',
+            }}
+          >
+            {initial(b.owner_name)}
+          </button>
+          <Rail
+            icon={b.mine ? 'grid' : b.installed ? 'check' : 'plus'}
+            label={b.mine ? '我的' : b.installed ? '已添加' : '添加'}
+            title="添加到我的作品" color="var(--text-primary)" onClick={() => void toggleAdd()}
+          />
+          <Rail icon="link" label="分享" title="复制链接" color="var(--text-primary)" onClick={() => void share()} />
+        </div>
+      </div>
+    </div>
+  );
 }

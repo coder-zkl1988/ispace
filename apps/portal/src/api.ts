@@ -144,8 +144,13 @@ export interface InstalledApp {
  */
 export interface BackendListing {
   id: string; backend_id: string; published_at: string; install_count: number;
+  /** 此刻正打开着这个后端的人数（backend_presence 90 秒窗口）。 */
+  live_count: number;
   category: string | null; name: string; status: string; has_cover: boolean;
+  /** 服务地址（/svc/{user}/{name}），exposed 后端浏览器可直接打开。 */
+  url_path: string;
   owner_username: string; owner_name: string;
+  owner_avatar: string | null;
   installed: boolean; mine: boolean;
   /** 根路径被 GET 过多少次（svc-proxy 每次代理成功打一下，不去重）。 */
   visit_count: number;
@@ -282,7 +287,8 @@ export const api = {
   /** 铸一个手机扫码登录的一次性码。60 秒过期，用一次即毁。 */
   mintQrCode: () => post<{ code: string; expiresIn: number }>('/auth/native/code'),
 
-  marketplace: () => get<{ listings: Listing[] }>('/marketplace'),
+  /** 探索墙的两半：页面 + exposed 的后端。旧后端版本没有后者，可选。 */
+  marketplace: () => get<{ listings: Listing[]; backendListings?: BackendListing[] }>('/marketplace'),
   installFromMarket: (appId: string) =>
     post<{ ok: boolean }>(`/marketplace/${appId}/install`),
   uninstallFromMarket: (appId: string) =>

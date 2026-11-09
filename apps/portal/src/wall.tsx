@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '@ispace/ui';
-import { api, type Listing } from './api';
+import { api, type BackendListing, type Listing } from './api';
 
 /**
  * 探索墙与作者页共用的一面卡片墙（改版稿 §探索）。
@@ -240,6 +240,139 @@ export function Cover({
 }
 
 // ── 一张卡 ──────────────────────────────────────────────────────────────
+
+/**
+ * 探索墙/为你推荐上的一项：页面，或 exposed 的后端。
+ *
+ * 后端不硬套 Listing——两者能做的动作天生不同（后端没有喜欢、评论、
+ * 做同款），按 kind 区分渲染比共用一个大而全的类型诚实。
+ */
+export type RecItem =
+  | { kind: 'app'; l: Listing }
+  | { kind: 'backend'; b: BackendListing };
+
+export const recKey = (r: RecItem): string =>
+  r.kind === 'app' ? `a:${r.l.app_id}` : `b:${r.b.backend_id}`;
+
+/**
+ * 两份数据按 install_count 合并成一面墙的顺序（各自接口本来就按它排）。
+ * 并排着看：同一档热度的页面和后端，页面在前——墙的主角终究是页面。
+ */
+export function mergeWall(listings: Listing[], backends: BackendListing[]): RecItem[] {
+  const apps = listings.map((l): RecItem => ({ kind: 'app', l }));
+  const bes = backends.map((b): RecItem => ({ kind: 'backend', b }));
+  return [...apps, ...bes].sort((x, y) => {
+    const ix = x.kind === 'app' ? x.l.install_count : x.b.install_count;
+    const iy = y.kind === 'app' ? y.l.install_count : y.b.install_count;
+    return iy - ix;
+  });
+}
+
+export function BackendWallCard({
+  item, onOpen, onAuthor, showDesc = false,
+}: {
+  item: BackendListing;
+  onOpen: () => void;
+  onAuthor: () => void;
+  showDesc?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ breakInside: 'avoid', paddingBottom: 30 }}
+    >
+      <div
+        onClick={onOpen}
+        style={{
+          position: 'relative', aspectRatio: '4 / 3', borderRadius: 20,
+          cursor: 'pointer',
+          transform: hover ? 'translateY(-3px)' : 'none',
+          boxShadow: hover ? '0 24px 48px -24px rgba(0,0,0,.35)' : 'none',
+          transition: 'transform .25s var(--ease-out-expo), box-shadow .25s',
+        }}
+      >
+        <Cover src={null} label="" tint={washOf(item.backend_id)} radius={20}>
+          {/*
+            后端不做截图封面（多半没有像样的首屏，编一个反而假）。
+            一枚首字母底板 + 「后端」徽标把身份说清楚，点开就是真页面。
+          */}
+          <span
+            style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontSize: 54, fontFamily: 'var(--font-serif)',
+              fontWeight: 500, color: 'var(--text-heading)', opacity: 0.55,
+              pointerEvents: 'none', userSelect: 'none',
+            }}
+          >
+            {initial(item.name)}
+          </span>
+          <span
+            style={{
+              position: 'absolute', top: 12, left: 12, height: 24, padding: '0 10px',
+              borderRadius: 'var(--radius-pill)', background: 'var(--surface-1)',
+              color: 'var(--text-heading)', fontSize: 'var(--text-base)',
+              fontWeight: 'var(--weight-semibold)', display: 'flex', alignItems: 'center',
+              gap: 5, pointerEvents: 'none',
+            }}
+          >
+            <Icon name="db" size={12} />后端
+          </span>
+          {hover && (
+            <div style={{ position: 'absolute', left: 12, right: 12, bottom: 12, display: 'flex', gap: 8 }}>
+              <CoverButton onClick={onOpen} tone="cta">
+                <Icon name="upRight" size={14} />打开
+              </CoverButton>
+            </div>
+          )}
+        </Cover>
+      </div>
+
+      <div
+        onClick={onOpen}
+        style={{
+          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+          gap: 10, padding: '14px 2px 6px', cursor: 'pointer',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 'var(--text-card-title)', fontWeight: 'var(--weight-semibold)',
+            letterSpacing: '-.01em', color: 'var(--text-heading)',
+          }}
+        >
+          {item.name}
+        </span>
+        <span
+          className="num"
+          style={{ fontSize: 'var(--text-base)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}
+        >
+          {fmt(item.install_count)} 人复用
+          {item.live_count > 0 && ` · ${fmt(item.live_count)} 人正在用`}
+        </span>
+      </div>
+
+      {showDesc && item.category && (
+        <p
+          style={{
+            margin: '0 2px 10px', fontSize: 'var(--text-base)', lineHeight: 1.6,
+            color: 'var(--text-secondary)', textWrap: 'pretty',
+          }}
+        >
+          {item.category}
+        </p>
+      )}
+
+      <AuthorChip
+        name={item.owner_name} username={item.owner_username} avatarUrl={item.owner_avatar}
+        onClick={onAuthor}
+      />
+    </div>
+  );
+}
+
 export function WallCard({
   item, onOpen, onPlay, onRemix, onAuthor, showDesc = false,
 }: {

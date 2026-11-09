@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { EXPLORE_ALL, EXPLORE_CATEGORIES, exploreBucket } from '@ispace/contracts';
 import { Icon, Mark } from '@ispace/ui';
-import type { Listing } from './api';
+import type { BackendListing, Listing } from './api';
 import { EventBanner } from './event/Banner';
-import { Wall, WallCard, appHref } from './wall';
+import { BackendWallCard, Wall, WallCard, appHref, mergeWall, type RecItem } from './wall';
 
 /**
  * 探索（改版稿 §探索）。
@@ -12,14 +12,17 @@ import { Wall, WallCard, appHref } from './wall';
  * 它改成一面错落的卡片墙，顶上一句话和一个输入框 —— 先让人想起自己要做
  * 什么，再给他看别人做了什么。分类从左侧栏挪到了墙顶上一排圆角标签。
  *
- * 数据还是 /marketplace 那一条（同事选了「全公司」的页面）。分类标签按
- * exploreBucket 归桶，所以改版前攒下的「效率工具」「表单问卷」这些旧分类
- * 仍然点得到——详见 contracts/social.ts 里那张映射表。
+ * 数据还是 /marketplace 那一条：页面之外，2026-11 起也端上 **exposed 的
+ * 后端**（全栈项目有真实可打开的页面，「点开看」成立；纯 API 服务不收，
+ * 仍留在控制台）。分类标签按 exploreBucket 归桶，所以改版前攒下的
+ * 「效率工具」「表单问卷」这些旧分类仍然点得到——详见 contracts/social.ts
+ * 里那张映射表。
  */
 export function Explore({
-  listings, q, onClearQ, onOpen, onPlay, onRemix, onAuthor, onPrompt,
+  listings, backendListings = [], q, onClearQ, onOpen, onPlay, onRemix, onAuthor, onPrompt,
 }: {
   listings: Listing[];
+  backendListings?: BackendListing[];
   q: string;
   onClearQ: () => void;
   onOpen: (l: Listing) => void;
@@ -33,12 +36,14 @@ export function Explore({
   const [draft, setDraft] = useState('');
 
   const kw = q.trim().toLowerCase();
-  const visible = listings.filter((l) => {
+  const visible = mergeWall(listings, backendListings).filter((r) => {
     if (kw) {
-      return `${l.name} ${l.description ?? ''} ${l.owner_name} ${l.category ?? ''}`
-        .toLowerCase().includes(kw);
+      const hay = r.kind === 'app'
+        ? `${r.l.name} ${r.l.description ?? ''} ${r.l.owner_name} ${r.l.category ?? ''}`
+        : `${r.b.name} ${r.b.owner_name} ${r.b.category ?? ''}`;
+      return hay.toLowerCase().includes(kw);
     }
-    return cat === EXPLORE_ALL || exploreBucket(l.category) === cat;
+    return cat === EXPLORE_ALL || exploreBucket(r.kind === 'app' ? r.l.category : r.b.category) === cat;
   });
 
   return (
@@ -155,18 +160,25 @@ export function Explore({
 
       {visible.length === 0 ? (
         <div style={{ padding: '60px 0', textAlign: 'center', fontSize: 'var(--text-md)', color: 'var(--text-tertiary)' }}>
-          {kw ? `没找到和「${q}」有关的页面。` : '这里还没有页面。'}
+          {kw ? `没找到和「${q}」有关的作品。` : '这里还没有作品。'}
         </div>
       ) : (
         <Wall>
-          {visible.map((l) => (
+          {visible.map((r: RecItem) => r.kind === 'app' ? (
             <WallCard
-              key={l.id}
-              item={l}
-              onOpen={() => onOpen(l)}
-              onPlay={() => onPlay(l)}
-              onRemix={l.source_prompt ? () => onRemix(l) : null}
-              onAuthor={() => onAuthor(l.owner_username)}
+              key={r.l.id}
+              item={r.l}
+              onOpen={() => onOpen(r.l)}
+              onPlay={() => onPlay(r.l)}
+              onRemix={r.l.source_prompt ? () => onRemix(r.l) : null}
+              onAuthor={() => onAuthor(r.l.owner_username)}
+            />
+          ) : (
+            <BackendWallCard
+              key={r.b.id}
+              item={r.b}
+              onOpen={() => window.open(r.b.url_path, '_blank', 'noopener')}
+              onAuthor={() => onAuthor(r.b.owner_username)}
             />
           ))}
         </Wall>

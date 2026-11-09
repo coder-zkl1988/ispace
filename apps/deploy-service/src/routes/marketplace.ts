@@ -60,9 +60,48 @@ export function registerMarketplaceRoutes(
        WHERE a.status <> 'stopped'
        ORDER BY m.install_count DESC, m.published_at DESC
     `;
+    /*
+     * 后端 listing 一起端上来（探索墙混排的另一半）。
+     *
+     * 只收 **exposed** 的后端：探索是一面能点开看的墙，纯 API 服务没有
+     * 可打开的页面，硬摆上去只会收获一张点不开的卡——那类后端仍然留在
+     * 控制台「后端与数据」（D10 的边界对它们继续成立）。exposed 全栈
+     * 项目有真实可用的页面，点开 = url_path（/svc/{user}/{name}），
+     * 「点开看」这一条对它们是成立的。
+     *
+     * 在市场上架（listing 存在）本身意味着 visibility='public'——上架
+     * 与公开在可见范围切换里是同一次事务的两面，这里不用再筛。
+     */
+    const backendRows = await sql`
+      SELECT m.id, m.backend_id, m.published_at, m.install_count,
+             -- 与页面同一窗口的「M 人正在用」（svc 代理请求流的心跳）
+             (SELECT count(*) FROM ispace.backend_presence p
+               WHERE p.backend_id = m.backend_id
+                 AND p.last_seen_at > now() - interval '90 seconds') AS live_count,
+             b.category, b.name, b.status, b.visit_count,
+             b.url_path, (b.cover IS NOT NULL) AS has_cover,
+             u.username AS owner_username, u.display_name AS owner_name,
+             av.etag AS owner_avatar_etag,
+             EXISTS (
+               SELECT 1 FROM ispace.backend_installs i
+                WHERE i.backend_id = m.backend_id AND i.user_id = ${me.id}
+             ) AS installed,
+             (b.owner_id = ${me.id}) AS mine
+        FROM ispace.marketplace_listings m
+        JOIN ispace.backends b ON b.id = m.backend_id
+        JOIN ispace.users u ON u.id = b.owner_id
+        LEFT JOIN ispace.user_avatars av ON av.user_id = u.id
+       WHERE b.status <> 'stopped' AND b.exposed
+       ORDER BY m.install_count DESC, m.published_at DESC
+    `;
+
     // 卡片左下角的作者头像。etag 只用来拼地址，不往外送
     return {
       listings: rows.map(({ owner_avatar_etag, ...r }) => ({
+        ...r,
+        owner_avatar: avatarUrlFor(r.owner_username as string, owner_avatar_etag as string | null),
+      })),
+      backendListings: backendRows.map(({ owner_avatar_etag, ...r }) => ({
         ...r,
         owner_avatar: avatarUrlFor(r.owner_username as string, owner_avatar_etag as string | null),
       })),
